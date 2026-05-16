@@ -1,4 +1,7 @@
 PYTHON ?= python3
+PROJECT_ROOT := $(CURDIR)
+SOURCE_ROOT := $(PROJECT_ROOT)/src
+export PYTHONPATH := $(SOURCE_ROOT):$(PYTHONPATH)
 
 .PHONY: install-dev compile test lint typecheck format check
 
