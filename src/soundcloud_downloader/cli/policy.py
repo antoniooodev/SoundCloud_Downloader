@@ -4,6 +4,7 @@ from typing import Annotated
 import typer
 
 from soundcloud_downloader.application import PolicyEvaluationRequest, PolicyEvaluationService
+from soundcloud_downloader.cli.options import parse_optional_bool
 from soundcloud_downloader.domain import (
     AccessMode,
     DRMStatus,
@@ -15,17 +16,6 @@ from soundcloud_downloader.domain import (
 )
 
 policy_app = typer.Typer(help="Evaluate reconstruction policy decisions.")
-
-
-def _parse_optional_bool(value: str) -> bool | None:
-    normalized = value.lower()
-    if normalized == "true":
-        return True
-    if normalized == "false":
-        return False
-    if normalized == "unknown":
-        return None
-    raise typer.BadParameter("Expected one of: true, false, unknown.")
 
 
 @policy_app.command("evaluate")
@@ -153,7 +143,7 @@ def evaluate_policy(
         is_preview_only=preview_only,
         is_downloadable=track_downloadable,
         is_own_track=own_track,
-        offline_allowed=_parse_optional_bool(offline_allowed),
+        offline_allowed=parse_optional_bool(offline_allowed),
         source=source,
     )
     response = PolicyEvaluationService().evaluate(request)
