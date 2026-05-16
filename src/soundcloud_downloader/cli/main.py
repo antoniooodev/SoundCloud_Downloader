@@ -8,6 +8,11 @@ app = typer.Typer(
 )
 
 
+@app.callback()
+def main() -> None:
+    """SoundCloud Downloader command line interface."""
+
+
 @app.command()
 def version() -> None:
     """Print the package version."""
