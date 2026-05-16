@@ -11,6 +11,11 @@ from soundcloud_downloader.domain.errors import ErrorCode, SoundcloudDownloaderE
 from soundcloud_downloader.domain.media import MediaSource, TrackAccessContext
 from soundcloud_downloader.domain.policy import PolicyDecision
 from soundcloud_downloader.domain.reconstruction_policy import ReconstructionPolicyEngine
+from soundcloud_downloader.domain.resolver import (
+    NormalizedResolverInput,
+    ResolverInputType,
+    SoundCloudResourceType,
+)
 from soundcloud_downloader.domain.stream_analysis import (
     HLSDrmIndicator,
     HLSManifestAnalysis,
@@ -27,11 +32,14 @@ __all__ = [
     "MediaCodec",
     "MediaContainer",
     "MediaSource",
+    "NormalizedResolverInput",
     "OfflineDecision",
     "OutputProfile",
     "PolicyDecision",
     "ReconstructionPolicyEngine",
+    "ResolverInputType",
     "SoundcloudDownloaderError",
+    "SoundCloudResourceType",
     "SourceProtocol",
     "TrackAccessContext",
 ]

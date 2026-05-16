@@ -9,6 +9,7 @@ from soundcloud_downloader.application.reconstruction_planner import (
     ReconstructionPlanner,
     ReconstructionPlanRequest,
 )
+from soundcloud_downloader.application.resolver_input import ResolverInputNormalizer
 from soundcloud_downloader.application.stream_analysis_service import (
     StreamAnalysisRequest,
     StreamAnalysisResult,
@@ -23,6 +24,7 @@ __all__ = [
     "ReconstructionPlan",
     "ReconstructionPlanner",
     "ReconstructionPlanRequest",
+    "ResolverInputNormalizer",
     "StreamAnalysisRequest",
     "StreamAnalysisResult",
     "StreamAnalysisService",
