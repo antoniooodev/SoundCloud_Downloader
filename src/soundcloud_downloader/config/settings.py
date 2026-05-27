@@ -1,8 +1,9 @@
 from enum import Enum
 from pathlib import Path
 from typing import Self
+from urllib.parse import urlsplit
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -40,6 +41,24 @@ class AppSettings(BaseSettings):
     enable_go_plus_mode: bool = True
     allow_network: bool = False
     allow_filesystem_writes: bool = False
+    soundcloud_resolve_endpoint: str | None = None
+
+    @field_validator("soundcloud_resolve_endpoint")
+    @classmethod
+    def validate_soundcloud_resolve_endpoint(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("SoundCloud resolve endpoint must not be empty.")
+        parsed = urlsplit(stripped)
+        if not parsed.scheme or not parsed.netloc:
+            raise ValueError("SoundCloud resolve endpoint must be a URL.")
+        if parsed.query or parsed.fragment:
+            raise ValueError("SoundCloud resolve endpoint must not contain query or fragment.")
+        if parsed.username or parsed.password:
+            raise ValueError("SoundCloud resolve endpoint must not contain credentials.")
+        return stripped
 
     @model_validator(mode="after")
     def validate_production_log_level(self) -> Self:
