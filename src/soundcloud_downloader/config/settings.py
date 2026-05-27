@@ -42,23 +42,28 @@ class AppSettings(BaseSettings):
     allow_network: bool = False
     allow_filesystem_writes: bool = False
     soundcloud_resolve_endpoint: str | None = None
+    soundcloud_api_base_url: str = "https://api.soundcloud.com"
+    soundcloud_auth_base_url: str = "https://secure.soundcloud.com"
+
+    @field_validator("soundcloud_api_base_url", "soundcloud_auth_base_url")
+    @classmethod
+    def validate_soundcloud_base_url(cls, value: str) -> str:
+        return _validate_url_without_sensitive_parts(
+            value,
+            field_name="SoundCloud base URL",
+            strip_trailing_slash=True,
+        )
 
     @field_validator("soundcloud_resolve_endpoint")
     @classmethod
     def validate_soundcloud_resolve_endpoint(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        stripped = value.strip()
-        if not stripped:
-            raise ValueError("SoundCloud resolve endpoint must not be empty.")
-        parsed = urlsplit(stripped)
-        if not parsed.scheme or not parsed.netloc:
-            raise ValueError("SoundCloud resolve endpoint must be a URL.")
-        if parsed.query or parsed.fragment:
-            raise ValueError("SoundCloud resolve endpoint must not contain query or fragment.")
-        if parsed.username or parsed.password:
-            raise ValueError("SoundCloud resolve endpoint must not contain credentials.")
-        return stripped
+        return _validate_url_without_sensitive_parts(
+            value,
+            field_name="SoundCloud resolve endpoint",
+            strip_trailing_slash=False,
+        )
 
     @model_validator(mode="after")
     def validate_production_log_level(self) -> Self:
@@ -83,3 +88,24 @@ def load_settings(env_file: str | Path | None = None) -> AppSettings:
         )
 
     return EnvFileAppSettings()
+
+
+def _validate_url_without_sensitive_parts(
+    value: str,
+    *,
+    field_name: str,
+    strip_trailing_slash: bool,
+) -> str:
+    stripped = value.strip()
+    if not stripped:
+        raise ValueError(f"{field_name} must not be empty.")
+    parsed = urlsplit(stripped)
+    if not parsed.scheme or not parsed.netloc:
+        raise ValueError(f"{field_name} must be a URL.")
+    if parsed.query or parsed.fragment:
+        raise ValueError(f"{field_name} must not contain query or fragment.")
+    if parsed.username or parsed.password:
+        raise ValueError(f"{field_name} must not contain credentials.")
+    if strip_trailing_slash:
+        return stripped.rstrip("/")
+    return stripped
