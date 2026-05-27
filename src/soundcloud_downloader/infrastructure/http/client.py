@@ -1,4 +1,5 @@
 import asyncio
+from collections.abc import Mapping
 from types import TracebackType
 
 import httpx
@@ -13,6 +14,8 @@ from soundcloud_downloader.infrastructure.observability import (
 )
 
 _RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
+_SENSITIVE_FORM_FIELD_NAMES = frozenset({"code", "code_verifier", "client_secret"})
+_REDACTED_FORM_VALUE = "[REDACTED]"
 
 
 class NetworkDisabledError(SoundcloudDownloaderError):
@@ -70,6 +73,7 @@ class SafeAsyncHttpClient:
                     headers=dict(request.headers),
                     params=dict(request.params),
                     json=dict(request.json_body) if request.json_body is not None else None,
+                    data=dict(request.form_data) if request.form_data is not None else None,
                     timeout=timeout_seconds,
                 )
             except (httpx.TimeoutException, httpx.NetworkError) as exc:
@@ -142,7 +146,20 @@ class SafeAsyncHttpClient:
             headers=redact_mapping(request.headers),
             params=redact_mapping({key: value for key, value in request.params.items()}),
             json_body=redact_mapping(request.json_body) if request.json_body is not None else None,
+            form_data=self._redact_form_data(request.form_data),
         )
+
+    def _redact_form_data(
+        self,
+        form_data: Mapping[str, str] | None,
+    ) -> dict[str, object] | None:
+        if form_data is None:
+            return None
+        redacted = redact_mapping(form_data)
+        for key in tuple(redacted):
+            if key.strip().lower() in _SENSITIVE_FORM_FIELD_NAMES:
+                redacted[key] = _REDACTED_FORM_VALUE
+        return redacted
 
     async def _schedule_retry(
         self,

@@ -1,5 +1,6 @@
 import asyncio
 from collections.abc import Awaitable, Callable
+from urllib.parse import parse_qs
 
 import httpx
 import pytest
@@ -169,6 +170,105 @@ def test_json_body_secret_fields_are_redacted_in_logs(capsys: pytest.CaptureFixt
     assert REDACTED_VALUE in output
     assert "raw-secret" not in output
     assert "safe" in output
+    run(client.aclose())
+
+
+def test_http_request_rejects_both_json_body_and_form_data() -> None:
+    with pytest.raises(ValidationError):
+        HttpRequest(
+            method=HttpMethod.POST,
+            url="https://example.test/",
+            json_body={"name": "value"},
+            form_data={"name": "value"},
+        )
+
+
+def test_form_data_is_sent_as_urlencoded_body() -> None:
+    seen_content_type = ""
+    seen_body = b""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal seen_content_type, seen_body
+        seen_content_type = request.headers["content-type"]
+        seen_body = request.content
+        return httpx.Response(200, request=request)
+
+    client = SafeAsyncHttpClient(network_settings(), transport=httpx.MockTransport(handler))
+    run(
+        client.request(
+            HttpRequest(
+                method=HttpMethod.POST,
+                url="https://example.test/",
+                form_data={"grant_type": "authorization_code", "client_id": "client-id"},
+            )
+        )
+    )
+
+    parsed_body = parse_qs(seen_body.decode())
+    assert seen_content_type.startswith("application/x-www-form-urlencoded")
+    assert parsed_body["grant_type"] == ["authorization_code"]
+    assert parsed_body["client_id"] == ["client-id"]
+    run(client.aclose())
+
+
+def test_form_data_secrets_are_redacted_in_logs(capsys: pytest.CaptureFixture[str]) -> None:
+    configure_logging(AppSettings())
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, request=request)
+
+    client = SafeAsyncHttpClient(network_settings(), transport=httpx.MockTransport(handler))
+    run(
+        client.request(
+            HttpRequest(
+                method=HttpMethod.POST,
+                url="https://example.test/",
+                form_data={
+                    "code": "raw-code",
+                    "code_verifier": "raw-code-verifier",
+                    "client_secret": "raw-client-secret",
+                    "client_id": "safe-client-id",
+                },
+            )
+        )
+    )
+    output = capsys.readouterr().err
+
+    assert REDACTED_VALUE in output
+    assert "safe-client-id" in output
+    assert "raw-code" not in output
+    assert "raw-code-verifier" not in output
+    assert "raw-client-secret" not in output
+    run(client.aclose())
+
+
+def test_raw_oauth_form_secret_values_do_not_appear_in_logs(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    configure_logging(AppSettings())
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, request=request)
+
+    client = SafeAsyncHttpClient(network_settings(), transport=httpx.MockTransport(handler))
+    raw_values = {
+        "code": "dummy-authorization-code",
+        "code_verifier": "A" * 64,
+        "client_secret": "dummy-client-secret",
+    }
+    run(
+        client.request(
+            HttpRequest(
+                method=HttpMethod.POST,
+                url="https://example.test/",
+                form_data=raw_values,
+            )
+        )
+    )
+    output = capsys.readouterr().err
+
+    for raw_value in raw_values.values():
+        assert raw_value not in output
     run(client.aclose())
 
 
