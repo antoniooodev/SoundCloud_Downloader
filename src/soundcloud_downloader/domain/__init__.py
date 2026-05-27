@@ -19,6 +19,12 @@ from soundcloud_downloader.domain.oauth import (
     OAuthResponseType,
     OAuthState,
 )
+from soundcloud_downloader.domain.oauth_session import (
+    OAuthAuthorizationSession,
+    OAuthAuthorizationSessionPublic,
+    OAuthSessionId,
+    OAuthSessionStatus,
+)
 from soundcloud_downloader.domain.policy import PolicyDecision
 from soundcloud_downloader.domain.reconstruction_policy import ReconstructionPolicyEngine
 from soundcloud_downloader.domain.resolver import (
@@ -44,12 +50,16 @@ __all__ = [
     "MediaSource",
     "NormalizedResolverInput",
     "OAuthAuthorizationRequest",
+    "OAuthAuthorizationSession",
+    "OAuthAuthorizationSessionPublic",
     "OAuthClientId",
     "OAuthCodeChallenge",
     "OAuthCodeChallengeMethod",
     "OAuthCodeVerifier",
     "OAuthRedirectUri",
     "OAuthResponseType",
+    "OAuthSessionId",
+    "OAuthSessionStatus",
     "OAuthState",
     "OfflineDecision",
     "OutputProfile",
