@@ -6,6 +6,10 @@ from soundcloud_downloader.application.oauth_session_service import (
     OAuthAuthorizationSessionService,
     OAuthAuthorizationSessionStore,
 )
+from soundcloud_downloader.application.oauth_token_exchange import (
+    OAuthTokenExchangeRequestBuilder,
+    redact_token_exchange_request,
+)
 from soundcloud_downloader.application.policy_service import (
     PolicyEvaluationRequest,
     PolicyEvaluationResponse,
@@ -35,6 +39,7 @@ __all__ = [
     "OAuthAuthorizationSessionService",
     "OAuthAuthorizationSessionStore",
     "OAuthPKCEService",
+    "OAuthTokenExchangeRequestBuilder",
     "PolicyEvaluationRequest",
     "PolicyEvaluationResponse",
     "PolicyEvaluationService",
@@ -48,4 +53,5 @@ __all__ = [
     "StreamAnalysisRequest",
     "StreamAnalysisResult",
     "StreamAnalysisService",
+    "redact_token_exchange_request",
 ]
