@@ -5,12 +5,21 @@ from typing import Annotated
 import typer
 from pydantic import SecretStr
 
-from soundcloud_downloader.application import OAuthPKCEService
-from soundcloud_downloader.config import load_settings
+from soundcloud_downloader.application import (
+    CreateOAuthAuthorizationSessionRequest,
+    InMemoryOAuthAuthorizationSessionStore,
+    OAuthAuthorizationSessionService,
+    OAuthPKCEService,
+)
+from soundcloud_downloader.config import AppSettings, load_settings
 from soundcloud_downloader.domain import OAuthClientId, OAuthRedirectUri
 
 
 oauth_app = typer.Typer(help="OAuth helper commands.")
+
+
+def _build_auth_base_url(settings: AppSettings, auth_base_url: str | None) -> str:
+    return auth_base_url if auth_base_url is not None else settings.soundcloud_auth_base_url
 
 
 @oauth_app.command("authorize-url")
@@ -45,7 +54,7 @@ def authorize_url(
     ] = True,
 ) -> None:
     settings = load_settings(env_file=env_file)
-    selected_auth_base_url = auth_base_url if auth_base_url is not None else settings.soundcloud_auth_base_url
+    selected_auth_base_url = _build_auth_base_url(settings, auth_base_url)
 
     service = OAuthPKCEService()
     oauth_client_id = OAuthClientId(value=SecretStr(client_id))
@@ -76,4 +85,66 @@ def authorize_url(
             "Token exchange will be implemented in a later task."
         ),
     }
+    typer.echo(json.dumps(payload, indent=2, sort_keys=True))
+
+
+@oauth_app.command("create-session")
+def create_session(
+    client_id: Annotated[
+        str,
+        typer.Option("--client-id", help="SoundCloud app client ID."),
+    ],
+    redirect_uri: Annotated[
+        str,
+        typer.Option("--redirect-uri", help="OAuth redirect URI."),
+    ],
+    env_file: Annotated[
+        Path | None,
+        typer.Option("--env-file", help="Explicit settings env file."),
+    ] = None,
+    auth_base_url: Annotated[
+        str | None,
+        typer.Option("--auth-base-url", help="Override OAuth authorization base URL."),
+    ] = None,
+    verifier_length: Annotated[
+        int,
+        typer.Option("--verifier-length", help="PKCE code verifier length."),
+    ] = 64,
+    state_length: Annotated[
+        int,
+        typer.Option("--state-length", help="OAuth state length."),
+    ] = 32,
+    ttl_seconds: Annotated[
+        int,
+        typer.Option("--ttl-seconds", help="OAuth authorization session TTL in seconds."),
+    ] = 600,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json/--plain", help="Print structured JSON or session ID and URL."),
+    ] = True,
+) -> None:
+    settings = load_settings(env_file=env_file)
+    selected_auth_base_url = _build_auth_base_url(settings, auth_base_url)
+    request = CreateOAuthAuthorizationSessionRequest(
+        client_id=OAuthClientId(value=SecretStr(client_id)),
+        redirect_uri=OAuthRedirectUri(value=redirect_uri),
+        auth_base_url=selected_auth_base_url,
+        verifier_length=verifier_length,
+        state_length=state_length,
+        ttl_seconds=ttl_seconds,
+    )
+    public_session = OAuthAuthorizationSessionService(
+        store=InMemoryOAuthAuthorizationSessionStore(),
+    ).create_session(request)
+
+    if not json_output:
+        typer.echo(public_session.session_id)
+        typer.echo(public_session.authorization_url)
+        return
+
+    payload = public_session.model_dump(mode="json")
+    payload["warning"] = (
+        "This session is stored in memory only and will not survive process exit. "
+        "Persistent secure storage will be implemented in a later task."
+    )
     typer.echo(json.dumps(payload, indent=2, sort_keys=True))
