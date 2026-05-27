@@ -1,4 +1,5 @@
 from soundcloud_downloader.application.hls_manifest_analyzer import HLSManifestAnalyzer
+from soundcloud_downloader.application.oauth_pkce import OAuthPKCEService
 from soundcloud_downloader.application.policy_service import (
     PolicyEvaluationRequest,
     PolicyEvaluationResponse,
@@ -23,6 +24,7 @@ from soundcloud_downloader.application.stream_analysis_service import (
 
 __all__ = [
     "HLSManifestAnalyzer",
+    "OAuthPKCEService",
     "PolicyEvaluationRequest",
     "PolicyEvaluationResponse",
     "PolicyEvaluationService",
