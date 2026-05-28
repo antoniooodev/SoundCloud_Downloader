@@ -1,5 +1,8 @@
 from soundcloud_downloader.application.ports.auth import AccessTokenProviderPort
-from soundcloud_downloader.application.ports.oauth import OAuthTokenExchangePort
+from soundcloud_downloader.application.ports.oauth import (
+    OAuthRefreshTokenPort,
+    OAuthTokenExchangePort,
+)
 from soundcloud_downloader.application.ports.soundcloud import (
     SoundCloudMetadataPort,
     SoundCloudPlaylistSummary,
@@ -14,6 +17,7 @@ from soundcloud_downloader.application.ports.soundcloud import (
 
 __all__ = [
     "AccessTokenProviderPort",
+    "OAuthRefreshTokenPort",
     "OAuthTokenExchangePort",
     "SoundCloudMetadataPort",
     "SoundCloudPlaylistSummary",

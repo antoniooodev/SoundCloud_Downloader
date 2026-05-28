@@ -6,6 +6,7 @@ from soundcloud_downloader.domain import (
     OAuthClientSecret,
     OAuthCodeVerifier,
     OAuthRedirectUri,
+    OAuthRefreshToken,
     OAuthTokenResponse,
 )
 
@@ -20,5 +21,17 @@ class OAuthTokenExchangePort(Protocol):
         redirect_uri: OAuthRedirectUri,
         code: OAuthAuthorizationCode,
         code_verifier: OAuthCodeVerifier,
+    ) -> OAuthTokenResponse:
+        ...
+
+
+@runtime_checkable
+class OAuthRefreshTokenPort(Protocol):
+    async def refresh_access_token(
+        self,
+        *,
+        client_id: OAuthClientId,
+        client_secret: OAuthClientSecret,
+        refresh_token: OAuthRefreshToken,
     ) -> OAuthTokenResponse:
         ...
