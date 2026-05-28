@@ -45,6 +45,10 @@ from soundcloud_downloader.application.stream_analysis_service import (
     StreamAnalysisResult,
     StreamAnalysisService,
 )
+from soundcloud_downloader.application.transcoding_endpoint import (
+    SoundCloudTranscodingEndpointRequestBuilder,
+    redact_transcoding_endpoint_request,
+)
 
 __all__ = [
     "HLSManifestAnalyzer",
@@ -71,9 +75,11 @@ __all__ = [
     "ResolverServiceResult",
     "SoundCloudMetadataNormalizationError",
     "SoundCloudMetadataNormalizer",
+    "SoundCloudTranscodingEndpointRequestBuilder",
     "StreamAnalysisRequest",
     "StreamAnalysisResult",
     "StreamAnalysisService",
     "redact_refresh_token_request",
     "redact_token_exchange_request",
+    "redact_transcoding_endpoint_request",
 ]

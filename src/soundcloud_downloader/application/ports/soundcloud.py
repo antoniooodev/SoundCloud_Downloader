@@ -8,6 +8,7 @@ from soundcloud_downloader.domain import (
     MediaContainer,
     NormalizedResolverInput,
     SourceProtocol,
+    SoundCloudTranscodingMetadata,
 )
 
 
@@ -78,7 +79,7 @@ class SoundCloudTrackSummary(_SafeUrlModel):
     is_go_plus: bool = False
     is_preview_only: bool = False
     is_downloadable: bool = False
-    transcodings: tuple[SoundCloudTranscodingSummary, ...] = ()
+    transcodings: tuple[SoundCloudTranscodingMetadata | SoundCloudTranscodingSummary, ...] = ()
 
 
 class SoundCloudPlaylistSummary(_SafeUrlModel):

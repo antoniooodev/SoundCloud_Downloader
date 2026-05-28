@@ -1,6 +1,8 @@
 from collections.abc import Mapping
 from urllib.parse import urlsplit, urlunsplit
 
+from pydantic import SecretStr
+
 from soundcloud_downloader.application.ports import (
     SoundCloudPlaylistSummary,
     SoundCloudResolvedResource,
@@ -15,6 +17,11 @@ from soundcloud_downloader.domain import (
     MediaContainer,
     NormalizedResolverInput,
     SourceProtocol,
+    SoundCloudTranscodingEndpointUrl,
+    SoundCloudTranscodingFormat,
+    SoundCloudTranscodingMetadata,
+    SoundCloudTranscodingMimeType,
+    SoundCloudTranscodingProtocol,
 )
 
 _FORBIDDEN_KEYS = frozenset(
@@ -240,7 +247,7 @@ class SoundCloudResponseMapper:
     def _official_transcodings(
         self,
         payload: Mapping[str, object],
-    ) -> tuple[SoundCloudTranscodingSummary, ...]:
+    ) -> tuple[SoundCloudTranscodingMetadata, ...]:
         media = self._mapping(payload.get("media"))
         if media is None:
             return ()
@@ -252,19 +259,21 @@ class SoundCloudResponseMapper:
     def _official_transcoding(
         self,
         payload: Mapping[str, object],
-    ) -> SoundCloudTranscodingSummary:
+    ) -> SoundCloudTranscodingMetadata:
         format_payload = self._mapping(payload.get("format"))
-        protocol_value = format_payload.get("protocol") if format_payload is not None else None
-        mime_type = format_payload.get("mime_type") if format_payload is not None else None
-        return SoundCloudTranscodingSummary(
+        if format_payload is None:
+            raise TypeError("transcoding format must be a mapping")
+        return SoundCloudTranscodingMetadata(
             preset=self._optional_string(payload.get("preset")),
-            protocol=self._source_protocol(protocol_value),
-            mime_type=self._optional_string(mime_type),
             quality=self._optional_string(payload.get("quality")),
-            codec=MediaCodec.UNKNOWN,
-            container=MediaContainer.UNKNOWN,
-            requires_auth=True,
-            is_downloadable=False,
+            snipped=self._optional_bool(payload.get("snipped")),
+            format=SoundCloudTranscodingFormat(
+                protocol=self._transcoding_protocol(format_payload.get("protocol")),
+                mime_type=self._transcoding_mime_type(format_payload.get("mime_type")),
+            ),
+            endpoint_url=SoundCloudTranscodingEndpointUrl(
+                value=SecretStr(self._required_string(payload, "url"))
+            ),
         )
 
     def _resolve_status(self, value: object) -> SoundCloudResolveStatus:
@@ -361,6 +370,13 @@ class SoundCloudResponseMapper:
             raise TypeError("expected bool")
         return value
 
+    def _optional_bool(self, value: object) -> bool | None:
+        if value is None:
+            return None
+        if not isinstance(value, bool):
+            raise TypeError("expected optional bool")
+        return value
+
     def _official_public_flag(self, value: object) -> bool:
         if value is None:
             return False
@@ -377,6 +393,26 @@ class SoundCloudResponseMapper:
             return SourceProtocol(value)
         except ValueError:
             return SourceProtocol.UNKNOWN
+
+    def _transcoding_protocol(self, value: object) -> SoundCloudTranscodingProtocol:
+        if value is None:
+            return SoundCloudTranscodingProtocol.UNKNOWN
+        if not isinstance(value, str):
+            raise TypeError("protocol must be a string")
+        try:
+            return SoundCloudTranscodingProtocol(value)
+        except ValueError:
+            return SoundCloudTranscodingProtocol.UNKNOWN
+
+    def _transcoding_mime_type(self, value: object) -> SoundCloudTranscodingMimeType:
+        if value is None:
+            return SoundCloudTranscodingMimeType.UNKNOWN
+        if not isinstance(value, str):
+            raise TypeError("mime_type must be a string")
+        try:
+            return SoundCloudTranscodingMimeType(value)
+        except ValueError:
+            return SoundCloudTranscodingMimeType.UNKNOWN
 
     def _contains_forbidden_key(self, value: object) -> bool:
         if isinstance(value, Mapping):

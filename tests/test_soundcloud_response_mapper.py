@@ -9,6 +9,9 @@ from soundcloud_downloader.domain import (
     NormalizedResolverInput,
     ResolverInputType,
     SoundCloudResourceType,
+    SoundCloudTranscodingMetadata,
+    SoundCloudTranscodingMimeType,
+    SoundCloudTranscodingProtocol,
 )
 from soundcloud_downloader.infrastructure.soundcloud import SoundCloudResponseMapper
 
@@ -243,6 +246,165 @@ def test_maps_official_like_track_payload() -> None:
     assert resource.track.user.username == "artist"
 
 
+def test_track_payload_maps_hls_transcoding_metadata() -> None:
+    payload = official_track_payload()
+    transcoding_payload = _first_official_transcoding(payload)
+    format_payload = transcoding_payload["format"]
+    assert isinstance(format_payload, dict)
+    format_payload["protocol"] = "hls"
+
+    resource = SoundCloudResponseMapper().map_resolved_resource(payload, normalized())
+
+    assert resource.status is SoundCloudResolveStatus.RESOLVED
+    assert resource.track is not None
+    transcoding = resource.track.transcodings[0]
+    assert isinstance(transcoding, SoundCloudTranscodingMetadata)
+    assert transcoding.format.protocol is SoundCloudTranscodingProtocol.HLS
+    assert transcoding.format.mime_type is SoundCloudTranscodingMimeType.AUDIO_MPEG
+    assert transcoding.preset == "mp3_1_0"
+    assert transcoding.quality == "sq"
+    assert transcoding.is_hls is True
+
+
+def test_track_payload_maps_progressive_transcoding_metadata() -> None:
+    resource = SoundCloudResponseMapper().map_resolved_resource(
+        official_track_payload(),
+        normalized(),
+    )
+
+    assert resource.status is SoundCloudResolveStatus.RESOLVED
+    assert resource.track is not None
+    transcoding = resource.track.transcodings[0]
+    assert isinstance(transcoding, SoundCloudTranscodingMetadata)
+    assert transcoding.format.protocol is SoundCloudTranscodingProtocol.PROGRESSIVE
+    assert transcoding.is_progressive is True
+
+
+def test_track_payload_with_missing_media_maps_empty_transcodings() -> None:
+    payload = official_track_payload()
+    payload.pop("media")
+
+    resource = SoundCloudResponseMapper().map_resolved_resource(payload, normalized())
+
+    assert resource.status is SoundCloudResolveStatus.RESOLVED
+    assert resource.track is not None
+    assert resource.track.transcodings == ()
+
+
+def test_track_payload_with_empty_transcodings_maps_empty_tuple() -> None:
+    payload = official_track_payload()
+    media = payload["media"]
+    assert isinstance(media, dict)
+    media["transcodings"] = []
+
+    resource = SoundCloudResponseMapper().map_resolved_resource(payload, normalized())
+
+    assert resource.status is SoundCloudResolveStatus.RESOLVED
+    assert resource.track is not None
+    assert resource.track.transcodings == ()
+
+
+def test_unknown_transcoding_protocol_maps_unknown() -> None:
+    payload = official_track_payload()
+    transcoding_payload = _first_official_transcoding(payload)
+    format_payload = transcoding_payload["format"]
+    assert isinstance(format_payload, dict)
+    format_payload["protocol"] = "future-protocol"
+
+    resource = SoundCloudResponseMapper().map_resolved_resource(payload, normalized())
+
+    assert resource.status is SoundCloudResolveStatus.RESOLVED
+    assert resource.track is not None
+    transcoding = resource.track.transcodings[0]
+    assert isinstance(transcoding, SoundCloudTranscodingMetadata)
+    assert transcoding.format.protocol is SoundCloudTranscodingProtocol.UNKNOWN
+
+
+def test_unknown_transcoding_mime_type_maps_unknown() -> None:
+    payload = official_track_payload()
+    transcoding_payload = _first_official_transcoding(payload)
+    format_payload = transcoding_payload["format"]
+    assert isinstance(format_payload, dict)
+    format_payload["mime_type"] = "audio/future"
+
+    resource = SoundCloudResponseMapper().map_resolved_resource(payload, normalized())
+
+    assert resource.status is SoundCloudResolveStatus.RESOLVED
+    assert resource.track is not None
+    transcoding = resource.track.transcodings[0]
+    assert isinstance(transcoding, SoundCloudTranscodingMetadata)
+    assert transcoding.format.mime_type is SoundCloudTranscodingMimeType.UNKNOWN
+
+
+def test_invalid_transcodings_type_rejects_safely() -> None:
+    payload = official_track_payload()
+    media = payload["media"]
+    assert isinstance(media, dict)
+    media["transcodings"] = "not-a-sequence"
+
+    resource = SoundCloudResponseMapper().map_resolved_resource(payload, normalized())
+
+    assert resource.status is SoundCloudResolveStatus.ERROR
+    assert resource.kind is SoundCloudResourceKind.UNKNOWN
+    assert resource.warnings == ("SoundCloud resolver payload was malformed.",)
+
+
+def test_invalid_transcoding_format_type_rejects_safely() -> None:
+    payload = official_track_payload()
+    _first_official_transcoding(payload)["format"] = "not-a-mapping"
+
+    resource = SoundCloudResponseMapper().map_resolved_resource(payload, normalized())
+
+    assert resource.status is SoundCloudResolveStatus.ERROR
+    assert resource.warnings == ("SoundCloud resolver payload was malformed.",)
+
+
+def test_invalid_transcoding_endpoint_url_rejects_safely() -> None:
+    payload = official_track_payload()
+    _first_official_transcoding(payload)["url"] = "/relative/transcoding"
+
+    resource = SoundCloudResponseMapper().map_resolved_resource(payload, normalized())
+
+    assert resource.status is SoundCloudResolveStatus.ERROR
+    assert resource.warnings == ("SoundCloud resolver payload was malformed.",)
+
+
+def test_raw_transcoding_url_does_not_appear_in_mapped_dto_repr() -> None:
+    raw_url = "https://api.soundcloud.invalid/media/secret-stream-url"
+
+    resource = SoundCloudResponseMapper().map_resolved_resource(
+        official_track_payload(),
+        normalized(),
+    )
+
+    assert resource.status is SoundCloudResolveStatus.RESOLVED
+    assert raw_url not in repr(resource)
+
+
+def test_raw_transcoding_url_does_not_appear_in_mapped_dto_model_dump() -> None:
+    raw_url = "https://api.soundcloud.invalid/media/secret-stream-url"
+
+    resource = SoundCloudResponseMapper().map_resolved_resource(
+        official_track_payload(),
+        normalized(),
+    )
+
+    assert resource.status is SoundCloudResolveStatus.RESOLVED
+    assert raw_url not in str(resource.model_dump(mode="json"))
+
+
+def test_raw_transcoding_url_does_not_appear_in_exception_messages() -> None:
+    raw_url = "https://api.soundcloud.invalid/media/transcoding?access_token=raw-secret"
+    payload = official_track_payload()
+    _first_official_transcoding(payload)["url"] = raw_url
+
+    resource = SoundCloudResponseMapper().map_resolved_resource(payload, normalized())
+
+    assert resource.status is SoundCloudResolveStatus.ERROR
+    assert raw_url not in " ".join(resource.warnings)
+    assert "raw-secret" not in " ".join(resource.warnings)
+
+
 def test_maps_official_like_playlist_payload() -> None:
     resource = SoundCloudResponseMapper().map_resolved_resource(
         official_playlist_payload(),
@@ -393,3 +555,13 @@ def test_mapper_exception_messages_do_not_contain_sensitive_values() -> None:
 
     assert resource.warnings
     assert secret_value not in " ".join(resource.warnings)
+
+
+def _first_official_transcoding(payload: dict[str, object]) -> dict[str, object]:
+    media = payload["media"]
+    assert isinstance(media, dict)
+    transcodings = media["transcodings"]
+    assert isinstance(transcodings, list)
+    first_transcoding = transcodings[0]
+    assert isinstance(first_transcoding, dict)
+    return first_transcoding

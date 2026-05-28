@@ -61,6 +61,13 @@ from soundcloud_downloader.domain.stream_analysis import (
     HLSManifestAnalysis,
     HLSManifestKind,
 )
+from soundcloud_downloader.domain.transcoding import (
+    SoundCloudTranscodingEndpointUrl,
+    SoundCloudTranscodingFormat,
+    SoundCloudTranscodingMetadata,
+    SoundCloudTranscodingMimeType,
+    SoundCloudTranscodingProtocol,
+)
 
 __all__ = [
     "AccessMode",
@@ -107,6 +114,11 @@ __all__ = [
     "SoundCloudResolvedMetadata",
     "SoundCloudResourceId",
     "SoundCloudResourceType",
+    "SoundCloudTranscodingEndpointUrl",
+    "SoundCloudTranscodingFormat",
+    "SoundCloudTranscodingMetadata",
+    "SoundCloudTranscodingMimeType",
+    "SoundCloudTranscodingProtocol",
     "SoundCloudTrackMetadata",
     "SoundCloudUserMetadata",
     "SourceProtocol",
