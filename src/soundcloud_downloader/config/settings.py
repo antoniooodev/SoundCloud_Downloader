@@ -44,6 +44,7 @@ class AppSettings(BaseSettings):
     allow_filesystem_writes: bool = False
     oauth_session_store_path: Path = Path("data/oauth_sessions.enc")
     oauth_session_encryption_key: SecretStr | None = None
+    soundcloud_client_secret: SecretStr | None = None
     soundcloud_resolve_endpoint: str | None = None
     soundcloud_api_base_url: str = "https://api.soundcloud.com"
     soundcloud_auth_base_url: str = "https://secure.soundcloud.com"
@@ -67,6 +68,15 @@ class AppSettings(BaseSettings):
             Fernet(value.get_secret_value().encode("ascii"))
         except (TypeError, ValueError):
             raise ValueError("OAuth session encryption key must be a valid Fernet key.") from None
+        return value
+
+    @field_validator("soundcloud_client_secret")
+    @classmethod
+    def validate_soundcloud_client_secret(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is None:
+            return None
+        if value.get_secret_value() == "":
+            raise ValueError("SoundCloud client secret must not be empty when provided.")
         return value
 
     @field_validator("soundcloud_api_base_url", "soundcloud_auth_base_url")
