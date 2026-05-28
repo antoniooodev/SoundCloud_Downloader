@@ -1,5 +1,9 @@
 from soundcloud_downloader.application.hls_manifest_analyzer import HLSManifestAnalyzer
 from soundcloud_downloader.application.oauth_pkce import OAuthPKCEService
+from soundcloud_downloader.application.oauth_refresh import (
+    OAuthRefreshTokenRequestBuilder,
+    redact_refresh_token_request,
+)
 from soundcloud_downloader.application.oauth_session_service import (
     CreateOAuthAuthorizationSessionRequest,
     InMemoryOAuthAuthorizationSessionStore,
@@ -48,6 +52,7 @@ __all__ = [
     "OAuthAuthorizationCodeExchangeWorkflowRequest",
     "OAuthAuthorizationCodeExchangeWorkflowResult",
     "OAuthPKCEService",
+    "OAuthRefreshTokenRequestBuilder",
     "OAuthTokenExchangeRequestBuilder",
     "OAuthTokenStore",
     "PolicyEvaluationRequest",
@@ -63,5 +68,6 @@ __all__ = [
     "StreamAnalysisRequest",
     "StreamAnalysisResult",
     "StreamAnalysisService",
+    "redact_refresh_token_request",
     "redact_token_exchange_request",
 ]

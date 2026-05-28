@@ -8,6 +8,10 @@ from soundcloud_downloader.infrastructure.soundcloud.oauth_token_exchange import
     OAuthTokenExchangeError,
     OAuthTokenExchangeService,
 )
+from soundcloud_downloader.infrastructure.soundcloud.oauth_refresh import (
+    OAuthRefreshTokenError,
+    OAuthRefreshTokenService,
+)
 from soundcloud_downloader.infrastructure.soundcloud.official_resolver import (
     OfficialSoundCloudResolver,
     SoundCloudResolveRequestBuilder,
@@ -17,6 +21,8 @@ from soundcloud_downloader.infrastructure.soundcloud.response_mapper import Soun
 __all__ = [
     "OAuthTokenExchangeError",
     "OAuthTokenExchangeService",
+    "OAuthRefreshTokenError",
+    "OAuthRefreshTokenService",
     "OfficialSoundCloudResolver",
     "SoundCloudAccessToken",
     "SoundCloudApiEndpoint",

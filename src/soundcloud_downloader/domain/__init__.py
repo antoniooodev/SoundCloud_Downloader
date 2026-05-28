@@ -31,6 +31,7 @@ from soundcloud_downloader.domain.oauth_token import (
     OAuthClientSecret,
     OAuthGrantType,
     OAuthRefreshToken,
+    OAuthRefreshTokenRequest,
     OAuthTokenExchangeRequest,
     OAuthTokenResponse,
 )
@@ -74,6 +75,7 @@ __all__ = [
     "OAuthCodeVerifier",
     "OAuthGrantType",
     "OAuthRefreshToken",
+    "OAuthRefreshTokenRequest",
     "OAuthRedirectUri",
     "OAuthResponseType",
     "OAuthSessionId",

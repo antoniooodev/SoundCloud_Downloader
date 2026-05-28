@@ -132,6 +132,45 @@ class OAuthTokenExchangeRequest(BaseModel):
         return form_data
 
 
+class OAuthRefreshTokenRequest(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    token_url: str
+    grant_type: OAuthGrantType = OAuthGrantType.REFRESH_TOKEN
+    client_id: OAuthClientId
+    client_secret: OAuthClientSecret
+    refresh_token: OAuthRefreshToken
+
+    @field_validator("token_url")
+    @classmethod
+    def validate_token_url(cls, value: str) -> str:
+        parsed = urlparse(value)
+        if value == "" or parsed.scheme not in {"http", "https"} or parsed.netloc == "":
+            raise ValueError("OAuth token URL must be a non-empty absolute http or https URL.")
+        if parsed.query != "":
+            raise ValueError("OAuth token URL must not contain a query string.")
+        if parsed.fragment != "":
+            raise ValueError("OAuth token URL must not contain a fragment.")
+        if parsed.username is not None or parsed.password is not None:
+            raise ValueError("OAuth token URL must not contain userinfo credentials.")
+        return value
+
+    @field_validator("grant_type")
+    @classmethod
+    def validate_refresh_token_grant(cls, value: OAuthGrantType) -> OAuthGrantType:
+        if value is not OAuthGrantType.REFRESH_TOKEN:
+            raise ValueError("Only OAuth refresh_token refresh is supported.")
+        return value
+
+    def to_form_data(self) -> dict[str, str]:
+        return {
+            "grant_type": self.grant_type.value,
+            "client_id": self.client_id.value.get_secret_value(),
+            "client_secret": self.client_secret.value.get_secret_value(),
+            "refresh_token": self.refresh_token.value.get_secret_value(),
+        }
+
+
 class OAuthTokenResponse(BaseModel):
     model_config = ConfigDict(frozen=True)
 
