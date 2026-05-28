@@ -3,7 +3,8 @@ from pathlib import Path
 from typing import Self
 from urllib.parse import urlsplit
 
-from pydantic import Field, field_validator, model_validator
+from cryptography.fernet import Fernet
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -41,9 +42,32 @@ class AppSettings(BaseSettings):
     enable_go_plus_mode: bool = True
     allow_network: bool = False
     allow_filesystem_writes: bool = False
+    oauth_session_store_path: Path = Path("data/oauth_sessions.enc")
+    oauth_session_encryption_key: SecretStr | None = None
     soundcloud_resolve_endpoint: str | None = None
     soundcloud_api_base_url: str = "https://api.soundcloud.com"
     soundcloud_auth_base_url: str = "https://secure.soundcloud.com"
+
+    @field_validator("oauth_session_store_path")
+    @classmethod
+    def validate_oauth_session_store_path(cls, value: Path) -> Path:
+        if not isinstance(value, Path):
+            raise ValueError("OAuth session store path must be a filesystem path.")
+        return value
+
+    @field_validator("oauth_session_encryption_key")
+    @classmethod
+    def validate_oauth_session_encryption_key(
+        cls,
+        value: SecretStr | None,
+    ) -> SecretStr | None:
+        if value is None:
+            return None
+        try:
+            Fernet(value.get_secret_value().encode("ascii"))
+        except (TypeError, ValueError):
+            raise ValueError("OAuth session encryption key must be a valid Fernet key.") from None
+        return value
 
     @field_validator("soundcloud_api_base_url", "soundcloud_auth_base_url")
     @classmethod

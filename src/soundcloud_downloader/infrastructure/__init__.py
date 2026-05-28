@@ -17,6 +17,7 @@ from soundcloud_downloader.infrastructure.observability import (
     redact_url,
     redact_value,
 )
+from soundcloud_downloader.infrastructure.oauth import EncryptedOAuthAuthorizationSessionStore
 from soundcloud_downloader.infrastructure.soundcloud import (
     SoundCloudHttpResolver,
     SoundCloudResponseMapper,
@@ -31,6 +32,7 @@ __all__ = [
     "REDACTED_VALUE",
     "SENSITIVE_FIELD_NAMES",
     "SafeAsyncHttpClient",
+    "EncryptedOAuthAuthorizationSessionStore",
     "SoundCloudHttpResolver",
     "SoundCloudResponseMapper",
     "configure_logging",
