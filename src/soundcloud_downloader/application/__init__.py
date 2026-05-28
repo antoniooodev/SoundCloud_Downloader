@@ -1,4 +1,8 @@
 from soundcloud_downloader.application.hls_manifest_analyzer import HLSManifestAnalyzer
+from soundcloud_downloader.application.metadata_normalizer import (
+    SoundCloudMetadataNormalizationError,
+    SoundCloudMetadataNormalizer,
+)
 from soundcloud_downloader.application.oauth_pkce import OAuthPKCEService
 from soundcloud_downloader.application.oauth_refresh import (
     OAuthRefreshTokenRequestBuilder,
@@ -65,6 +69,8 @@ __all__ = [
     "ResolverService",
     "ResolverServiceRequest",
     "ResolverServiceResult",
+    "SoundCloudMetadataNormalizationError",
+    "SoundCloudMetadataNormalizer",
     "StreamAnalysisRequest",
     "StreamAnalysisResult",
     "StreamAnalysisService",
