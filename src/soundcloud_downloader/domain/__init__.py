@@ -34,6 +34,10 @@ from soundcloud_downloader.domain.oauth_token import (
     OAuthTokenExchangeRequest,
     OAuthTokenResponse,
 )
+from soundcloud_downloader.domain.oauth_token_store import (
+    OAuthTokenProfileId,
+    StoredOAuthTokenSet,
+)
 from soundcloud_downloader.domain.policy import PolicyDecision
 from soundcloud_downloader.domain.reconstruction_policy import ReconstructionPolicyEngine
 from soundcloud_downloader.domain.resolver import (
@@ -76,6 +80,7 @@ __all__ = [
     "OAuthSessionStatus",
     "OAuthState",
     "OAuthTokenExchangeRequest",
+    "OAuthTokenProfileId",
     "OAuthTokenResponse",
     "OfflineDecision",
     "OutputProfile",
@@ -85,5 +90,6 @@ __all__ = [
     "SoundcloudDownloaderError",
     "SoundCloudResourceType",
     "SourceProtocol",
+    "StoredOAuthTokenSet",
     "TrackAccessContext",
 ]

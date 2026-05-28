@@ -44,6 +44,8 @@ class AppSettings(BaseSettings):
     allow_filesystem_writes: bool = False
     oauth_session_store_path: Path = Path("data/oauth_sessions.enc")
     oauth_session_encryption_key: SecretStr | None = None
+    oauth_token_store_path: Path = Path("data/oauth_tokens.enc")
+    oauth_token_encryption_key: SecretStr | None = None
     soundcloud_client_secret: SecretStr | None = None
     soundcloud_resolve_endpoint: str | None = None
     soundcloud_api_base_url: str = "https://api.soundcloud.com"
@@ -56,9 +58,16 @@ class AppSettings(BaseSettings):
             raise ValueError("OAuth session store path must be a filesystem path.")
         return value
 
-    @field_validator("oauth_session_encryption_key")
+    @field_validator("oauth_token_store_path")
     @classmethod
-    def validate_oauth_session_encryption_key(
+    def validate_oauth_token_store_path(cls, value: Path) -> Path:
+        if not isinstance(value, Path):
+            raise ValueError("OAuth token store path must be a filesystem path.")
+        return value
+
+    @field_validator("oauth_session_encryption_key", "oauth_token_encryption_key")
+    @classmethod
+    def validate_fernet_key(
         cls,
         value: SecretStr | None,
     ) -> SecretStr | None:
@@ -67,7 +76,7 @@ class AppSettings(BaseSettings):
         try:
             Fernet(value.get_secret_value().encode("ascii"))
         except (TypeError, ValueError):
-            raise ValueError("OAuth session encryption key must be a valid Fernet key.") from None
+            raise ValueError("OAuth encryption key must be a valid Fernet key.") from None
         return value
 
     @field_validator("soundcloud_client_secret")
