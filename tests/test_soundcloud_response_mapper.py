@@ -56,6 +56,66 @@ def track_payload() -> dict[str, object]:
     }
 
 
+def official_track_payload() -> dict[str, object]:
+    return {
+        "kind": "track",
+        "id": 123,
+        "title": "Official track",
+        "duration": 42_000,
+        "permalink": "official-track",
+        "permalink_url": "https://soundcloud.com/user/official-track",
+        "artwork_url": "https://i.example.invalid/artwork.jpg",
+        "sharing": "public",
+        "downloadable": False,
+        "user": {
+            "kind": "user",
+            "id": 456,
+            "username": "artist",
+            "permalink": "artist",
+            "permalink_url": "https://soundcloud.com/artist",
+        },
+        "media": {
+            "transcodings": [
+                {
+                    "url": "https://api.soundcloud.invalid/media/secret-stream-url",
+                    "preset": "mp3_1_0",
+                    "quality": "sq",
+                    "format": {
+                        "protocol": "progressive",
+                        "mime_type": "audio/mpeg",
+                    },
+                }
+            ]
+        },
+    }
+
+
+def official_playlist_payload() -> dict[str, object]:
+    return {
+        "kind": "playlist",
+        "id": 789,
+        "title": "Official playlist",
+        "permalink_url": "https://soundcloud.com/user/sets/official-playlist",
+        "track_count": 1,
+        "user": {
+            "kind": "user",
+            "id": 456,
+            "username": "artist",
+        },
+        "tracks": [official_track_payload()],
+    }
+
+
+def official_user_payload() -> dict[str, object]:
+    return {
+        "kind": "user",
+        "id": 456,
+        "username": "artist",
+        "permalink_url": "https://soundcloud.com/artist",
+        "avatar_url": "https://i.example.invalid/avatar.jpg",
+    }
+
+
 def test_maps_valid_track_payload_to_resolved_track() -> None:
     resource = SoundCloudResponseMapper().map_resolved_resource(track_payload(), normalized())
 
@@ -166,3 +226,170 @@ def test_mapper_uses_in_memory_payloads_only() -> None:
     resource = SoundCloudResponseMapper().map_resolved_resource(track_payload(), normalized())
 
     assert resource.status is SoundCloudResolveStatus.RESOLVED
+
+
+def test_maps_official_like_track_payload() -> None:
+    resource = SoundCloudResponseMapper().map_resolved_resource(
+        official_track_payload(),
+        normalized(),
+    )
+
+    assert resource.status is SoundCloudResolveStatus.RESOLVED
+    assert resource.kind is SoundCloudResourceKind.TRACK
+    assert resource.track is not None
+    assert resource.track.soundcloud_id == "123"
+    assert resource.track.title == "Official track"
+    assert resource.track.user is not None
+    assert resource.track.user.username == "artist"
+
+
+def test_maps_official_like_playlist_payload() -> None:
+    resource = SoundCloudResponseMapper().map_resolved_resource(
+        official_playlist_payload(),
+        normalized(),
+    )
+
+    assert resource.status is SoundCloudResolveStatus.RESOLVED
+    assert resource.kind is SoundCloudResourceKind.PLAYLIST
+    assert resource.playlist is not None
+    assert resource.playlist.soundcloud_id == "789"
+    assert resource.playlist.title == "Official playlist"
+    assert resource.playlist.track_count == 1
+    assert len(resource.playlist.tracks) == 1
+
+
+def test_maps_official_like_user_payload() -> None:
+    resource = SoundCloudResponseMapper().map_resolved_resource(
+        official_user_payload(),
+        normalized(),
+    )
+
+    assert resource.status is SoundCloudResolveStatus.RESOLVED
+    assert resource.kind is SoundCloudResourceKind.USER
+    assert resource.user is not None
+    assert resource.user.soundcloud_id == "456"
+    assert resource.user.username == "artist"
+
+
+def test_maps_official_like_profile_payload_as_user() -> None:
+    payload = official_user_payload()
+    payload["kind"] = "profile"
+
+    resource = SoundCloudResponseMapper().map_resolved_resource(payload, normalized())
+
+    assert resource.status is SoundCloudResolveStatus.RESOLVED
+    assert resource.kind is SoundCloudResourceKind.USER
+    assert resource.user is not None
+
+
+def test_ignores_unknown_harmless_official_fields() -> None:
+    payload = official_track_payload()
+    payload["harmless_extra"] = {"nested": "value"}
+
+    resource = SoundCloudResponseMapper().map_resolved_resource(payload, normalized())
+
+    assert resource.status is SoundCloudResolveStatus.RESOLVED
+    assert resource.track is not None
+    assert resource.track.soundcloud_id == "123"
+
+
+def test_rejects_unsupported_official_kind() -> None:
+    resource = SoundCloudResponseMapper().map_resolved_resource(
+        {"kind": "comment", "id": 1},
+        normalized(),
+    )
+
+    assert resource.status is SoundCloudResolveStatus.ERROR
+    assert resource.kind is SoundCloudResourceKind.UNKNOWN
+
+
+def test_rejects_official_payload_missing_id() -> None:
+    payload = official_track_payload()
+    payload.pop("id")
+
+    resource = SoundCloudResponseMapper().map_resolved_resource(payload, normalized())
+
+    assert resource.status is SoundCloudResolveStatus.ERROR
+
+
+def test_rejects_invalid_official_id_type() -> None:
+    payload = official_track_payload()
+    payload["id"] = ["not-valid"]
+
+    resource = SoundCloudResponseMapper().map_resolved_resource(payload, normalized())
+
+    assert resource.status is SoundCloudResolveStatus.ERROR
+
+
+def test_rejects_invalid_official_track_title_type() -> None:
+    payload = official_track_payload()
+    payload["title"] = 123
+
+    resource = SoundCloudResponseMapper().map_resolved_resource(payload, normalized())
+
+    assert resource.status is SoundCloudResolveStatus.ERROR
+
+
+def test_rejects_invalid_official_playlist_title_type() -> None:
+    payload = official_playlist_payload()
+    payload["title"] = 123
+
+    resource = SoundCloudResponseMapper().map_resolved_resource(payload, normalized())
+
+    assert resource.status is SoundCloudResolveStatus.ERROR
+
+
+def test_rejects_invalid_official_username_type() -> None:
+    payload = official_user_payload()
+    payload["username"] = 123
+
+    resource = SoundCloudResponseMapper().map_resolved_resource(payload, normalized())
+
+    assert resource.status is SoundCloudResolveStatus.ERROR
+
+
+@pytest.mark.parametrize(
+    ("secret_key", "secret_value"),
+    [
+        ("access_token", "raw-access-token"),
+        ("refresh_token", "raw-refresh-token"),
+        ("client_secret", "raw-client-secret"),
+        ("cookie", "raw-cookie"),
+    ],
+)
+def test_sensitive_official_payload_fields_do_not_leak(
+    secret_key: str,
+    secret_value: str,
+) -> None:
+    payload = official_track_payload()
+    payload[secret_key] = secret_value
+
+    resource = SoundCloudResponseMapper().map_resolved_resource(payload, normalized())
+    dumped = repr(resource) + str(resource.model_dump(mode="json"))
+
+    assert resource.status is SoundCloudResolveStatus.ERROR
+    assert secret_value not in dumped
+
+
+def test_official_media_transcoding_url_is_not_exposed() -> None:
+    raw_url = "https://api.soundcloud.invalid/media/secret-stream-url"
+
+    resource = SoundCloudResponseMapper().map_resolved_resource(
+        official_track_payload(),
+        normalized(),
+    )
+    dumped = repr(resource) + str(resource.model_dump(mode="json"))
+
+    assert resource.status is SoundCloudResolveStatus.RESOLVED
+    assert raw_url not in dumped
+
+
+def test_mapper_exception_messages_do_not_contain_sensitive_values() -> None:
+    secret_value = "raw-access-token"
+    payload = official_track_payload()
+    payload["access_token"] = secret_value
+
+    resource = SoundCloudResponseMapper().map_resolved_resource(payload, normalized())
+
+    assert resource.warnings
+    assert secret_value not in " ".join(resource.warnings)

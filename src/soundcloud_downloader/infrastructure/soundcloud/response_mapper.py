@@ -1,4 +1,5 @@
 from collections.abc import Mapping
+from urllib.parse import urlsplit, urlunsplit
 
 from soundcloud_downloader.application.ports import (
     SoundCloudPlaylistSummary,
@@ -25,6 +26,7 @@ _FORBIDDEN_KEYS = frozenset(
         "refresh_token",
         "authorization",
         "cookie",
+        "set-cookie",
         "set_cookie",
         "client_secret",
         "license_url",
@@ -41,6 +43,9 @@ class SoundCloudResponseMapper:
         try:
             if self._contains_forbidden_key(payload):
                 return self._error(normalized, "SoundCloud resolver payload contained forbidden fields.")
+
+            if "status" not in payload:
+                return self._official_resource(payload, normalized)
 
             status = self._resolve_status(payload.get("status"))
             kind = self._resource_kind(payload.get("kind"))
@@ -99,6 +104,39 @@ class SoundCloudResponseMapper:
         except (TypeError, ValueError):
             return self._error(normalized, "SoundCloud resolver payload was malformed.")
 
+    def _official_resource(
+        self,
+        payload: Mapping[str, object],
+        normalized: NormalizedResolverInput,
+    ) -> SoundCloudResolvedResource:
+        kind = self._official_resource_kind(payload.get("kind"))
+
+        if kind is SoundCloudResourceKind.TRACK:
+            return SoundCloudResolvedResource(
+                status=SoundCloudResolveStatus.RESOLVED,
+                kind=kind,
+                normalized=normalized,
+                track=self._official_track(payload),
+            )
+
+        if kind is SoundCloudResourceKind.PLAYLIST:
+            return SoundCloudResolvedResource(
+                status=SoundCloudResolveStatus.RESOLVED,
+                kind=kind,
+                normalized=normalized,
+                playlist=self._official_playlist(payload),
+            )
+
+        if kind is SoundCloudResourceKind.USER:
+            return SoundCloudResolvedResource(
+                status=SoundCloudResolveStatus.RESOLVED,
+                kind=kind,
+                normalized=normalized,
+                user=self._official_user(payload),
+            )
+
+        raise ValueError("unsupported official resource kind")
+
     def _track(self, payload: Mapping[str, object]) -> SoundCloudTrackSummary:
         return SoundCloudTrackSummary(
             soundcloud_id=self._required_string(payload, "soundcloud_id"),
@@ -151,11 +189,99 @@ class SoundCloudResponseMapper:
             is_downloadable=self._bool(payload.get("is_downloadable")),
         )
 
+    def _official_track(self, payload: Mapping[str, object]) -> SoundCloudTrackSummary:
+        return SoundCloudTrackSummary(
+            soundcloud_id=self._required_id(payload, "id"),
+            title=self._required_string(payload, "title"),
+            duration_ms=self._optional_int(payload.get("duration")),
+            permalink=self._optional_string(payload.get("permalink")),
+            permalink_url_redacted=self._redacted_url(payload.get("permalink_url")),
+            artwork_url_redacted=self._redacted_url(payload.get("artwork_url")),
+            user=(
+                self._official_user(user_payload)
+                if (user_payload := self._mapping(payload.get("user")))
+                else None
+            ),
+            is_public=self._official_public_flag(payload.get("sharing")),
+            is_go_plus=False,
+            is_preview_only=False,
+            is_downloadable=self._bool(payload.get("downloadable")),
+            transcodings=self._official_transcodings(payload),
+        )
+
+    def _official_playlist(self, payload: Mapping[str, object]) -> SoundCloudPlaylistSummary:
+        tracks = tuple(
+            self._official_track(item) for item in self._mapping_sequence(payload.get("tracks"))
+        )
+        return SoundCloudPlaylistSummary(
+            soundcloud_id=self._required_id(payload, "id"),
+            title=self._required_string(payload, "title"),
+            permalink=self._optional_string(payload.get("permalink")),
+            permalink_url_redacted=self._redacted_url(payload.get("permalink_url")),
+            artwork_url_redacted=self._redacted_url(payload.get("artwork_url")),
+            user=(
+                self._official_user(user_payload)
+                if (user_payload := self._mapping(payload.get("user")))
+                else None
+            ),
+            track_count=self._optional_int(payload.get("track_count")) or len(tracks),
+            tracks=tracks,
+        )
+
+    def _official_user(self, payload: Mapping[str, object]) -> SoundCloudUserSummary:
+        return SoundCloudUserSummary(
+            soundcloud_id=self._required_id(payload, "id"),
+            username=self._official_username(payload),
+            permalink=self._optional_string(payload.get("permalink")),
+            permalink_url_redacted=self._redacted_url(payload.get("permalink_url")),
+            avatar_url_redacted=self._redacted_url(payload.get("avatar_url")),
+        )
+
+    def _official_transcodings(
+        self,
+        payload: Mapping[str, object],
+    ) -> tuple[SoundCloudTranscodingSummary, ...]:
+        media = self._mapping(payload.get("media"))
+        if media is None:
+            return ()
+        return tuple(
+            self._official_transcoding(item)
+            for item in self._mapping_sequence(media.get("transcodings"))
+        )
+
+    def _official_transcoding(
+        self,
+        payload: Mapping[str, object],
+    ) -> SoundCloudTranscodingSummary:
+        format_payload = self._mapping(payload.get("format"))
+        protocol_value = format_payload.get("protocol") if format_payload is not None else None
+        mime_type = format_payload.get("mime_type") if format_payload is not None else None
+        return SoundCloudTranscodingSummary(
+            preset=self._optional_string(payload.get("preset")),
+            protocol=self._source_protocol(protocol_value),
+            mime_type=self._optional_string(mime_type),
+            quality=self._optional_string(payload.get("quality")),
+            codec=MediaCodec.UNKNOWN,
+            container=MediaContainer.UNKNOWN,
+            requires_auth=True,
+            is_downloadable=False,
+        )
+
     def _resolve_status(self, value: object) -> SoundCloudResolveStatus:
         return SoundCloudResolveStatus(str(value))
 
     def _resource_kind(self, value: object) -> SoundCloudResourceKind:
         return SoundCloudResourceKind(str(value))
+
+    def _official_resource_kind(self, value: object) -> SoundCloudResourceKind:
+        raw_kind = str(value)
+        if raw_kind == "track":
+            return SoundCloudResourceKind.TRACK
+        if raw_kind == "playlist":
+            return SoundCloudResourceKind.PLAYLIST
+        if raw_kind in {"user", "profile"}:
+            return SoundCloudResourceKind.USER
+        return SoundCloudResourceKind.UNKNOWN
 
     def _warnings(self, value: object) -> tuple[str, ...]:
         if value is None:
@@ -189,12 +315,37 @@ class SoundCloudResponseMapper:
             raise TypeError(f"{key} must be a non-empty string")
         return value
 
+    def _required_id(self, payload: Mapping[str, object], key: str) -> str:
+        value = payload.get(key)
+        if isinstance(value, bool) or value is None:
+            raise TypeError(f"{key} must be a non-empty string or integer")
+        if isinstance(value, int):
+            return str(value)
+        if isinstance(value, str) and value:
+            return value
+        raise TypeError(f"{key} must be a non-empty string or integer")
+
     def _optional_string(self, value: object) -> str | None:
         if value is None:
             return None
         if not isinstance(value, str):
             raise TypeError("expected optional string")
         return value
+
+    def _official_username(self, payload: Mapping[str, object]) -> str | None:
+        username = payload.get("username", payload.get("full_name"))
+        if not isinstance(username, str) or not username:
+            raise TypeError("username must be a non-empty string")
+        return username
+
+    def _redacted_url(self, value: object) -> str | None:
+        url = self._optional_string(value)
+        if url is None:
+            return None
+        parsed = urlsplit(url)
+        if parsed.username or parsed.password:
+            raise TypeError("URL must not contain userinfo")
+        return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
 
     def _optional_int(self, value: object) -> int | None:
         if value is None:
@@ -209,6 +360,23 @@ class SoundCloudResponseMapper:
         if not isinstance(value, bool):
             raise TypeError("expected bool")
         return value
+
+    def _official_public_flag(self, value: object) -> bool:
+        if value is None:
+            return False
+        if not isinstance(value, str):
+            raise TypeError("sharing must be a string")
+        return value == "public"
+
+    def _source_protocol(self, value: object) -> SourceProtocol:
+        if value is None:
+            return SourceProtocol.UNKNOWN
+        if not isinstance(value, str):
+            raise TypeError("protocol must be a string")
+        try:
+            return SourceProtocol(value)
+        except ValueError:
+            return SourceProtocol.UNKNOWN
 
     def _contains_forbidden_key(self, value: object) -> bool:
         if isinstance(value, Mapping):
