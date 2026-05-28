@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections.abc import Mapping
 from types import TracebackType
 
@@ -47,6 +48,8 @@ class SafeAsyncHttpClient:
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._settings = settings
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+        logging.getLogger("httpcore").setLevel(logging.WARNING)
         if client is not None:
             self._client = client
         elif transport is not None:
@@ -71,7 +74,7 @@ class SafeAsyncHttpClient:
                     request.method.value,
                     request.url,
                     headers=dict(request.headers),
-                    params=dict(request.params),
+                    params=dict(request.params) if request.params else None,
                     json=dict(request.json_body) if request.json_body is not None else None,
                     data=dict(request.form_data) if request.form_data is not None else None,
                     timeout=timeout_seconds,

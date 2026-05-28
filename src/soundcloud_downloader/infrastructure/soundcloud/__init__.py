@@ -17,6 +17,11 @@ from soundcloud_downloader.infrastructure.soundcloud.official_resolver import (
     SoundCloudResolveRequestBuilder,
 )
 from soundcloud_downloader.infrastructure.soundcloud.response_mapper import SoundCloudResponseMapper
+from soundcloud_downloader.infrastructure.soundcloud.transcoding_endpoint_service import (
+    SoundCloudTranscodingEndpointError,
+    SoundCloudTranscodingEndpointService,
+    redact_resolved_stream,
+)
 
 __all__ = [
     "OAuthTokenExchangeError",
@@ -30,4 +35,7 @@ __all__ = [
     "SoundCloudHttpResolver",
     "SoundCloudResolveRequestBuilder",
     "SoundCloudResponseMapper",
+    "SoundCloudTranscodingEndpointError",
+    "SoundCloudTranscodingEndpointService",
+    "redact_resolved_stream",
 ]

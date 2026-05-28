@@ -61,6 +61,11 @@ from soundcloud_downloader.domain.stream_analysis import (
     HLSManifestAnalysis,
     HLSManifestKind,
 )
+from soundcloud_downloader.domain.stream_url import (
+    SoundCloudResolvedStream,
+    SoundCloudResolvedStreamKind,
+    SoundCloudResolvedStreamUrl,
+)
 from soundcloud_downloader.domain.transcoding import (
     SoundCloudTranscodingEndpointUrl,
     SoundCloudTranscodingFormat,
@@ -112,6 +117,9 @@ __all__ = [
     "SoundCloudPermalinkUrl",
     "SoundCloudPlaylistMetadata",
     "SoundCloudResolvedMetadata",
+    "SoundCloudResolvedStream",
+    "SoundCloudResolvedStreamKind",
+    "SoundCloudResolvedStreamUrl",
     "SoundCloudResourceId",
     "SoundCloudResourceType",
     "SoundCloudTranscodingEndpointUrl",

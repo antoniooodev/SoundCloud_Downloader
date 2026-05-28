@@ -1,7 +1,14 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from soundcloud_downloader.domain import SoundCloudTranscodingMetadata
-from soundcloud_downloader.infrastructure.http.models import HttpMethod, HttpRequest
-from soundcloud_downloader.infrastructure.observability import REDACTED_VALUE
-from soundcloud_downloader.infrastructure.soundcloud.api_contract import SoundCloudAccessToken
+
+if TYPE_CHECKING:
+    from soundcloud_downloader.infrastructure.http.models import HttpRequest
+    from soundcloud_downloader.infrastructure.soundcloud.api_contract import SoundCloudAccessToken
+
+REDACTED_VALUE = "[REDACTED]"
 
 
 class SoundCloudTranscodingEndpointRequestBuilder:
@@ -11,6 +18,8 @@ class SoundCloudTranscodingEndpointRequestBuilder:
         transcoding: SoundCloudTranscodingMetadata,
         access_token: SoundCloudAccessToken,
     ) -> HttpRequest:
+        from soundcloud_downloader.infrastructure.http.models import HttpMethod, HttpRequest
+
         return HttpRequest(
             method=HttpMethod.GET,
             url=transcoding.endpoint_url.get_secret_value(),
