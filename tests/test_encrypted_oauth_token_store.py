@@ -160,6 +160,30 @@ def test_allow_filesystem_writes_false_prevents_save(tmp_path: Path) -> None:
     assert (tmp_path / "oauth_tokens.enc").exists() is False
 
 
+def test_get_can_read_existing_store_when_filesystem_writes_are_disabled(tmp_path: Path) -> None:
+    key = Fernet.generate_key().decode("ascii")
+    store_path = tmp_path / "oauth_tokens.enc"
+    token_set = _token_set()
+    _create_store(tmp_path, store_path=store_path, key=key).save(token_set)
+    read_only_store = _create_store(
+        tmp_path,
+        store_path=store_path,
+        key=key,
+        allow_filesystem_writes=False,
+    )
+
+    assert read_only_store.get(token_set.profile_id) == token_set
+
+
+def test_delete_with_filesystem_writes_disabled_fails_closed(tmp_path: Path) -> None:
+    store = _create_store(tmp_path, allow_filesystem_writes=False)
+
+    with pytest.raises(SoundcloudDownloaderError) as exc_info:
+        store.delete(OAuthTokenProfileId(value=RAW_PROFILE_ID))
+
+    _assert_safe_exception(exc_info.value)
+
+
 def test_save_creates_parent_directories_only_when_saving(tmp_path: Path) -> None:
     store_path = tmp_path / "nested" / "oauth_tokens.enc"
     store = _create_store(tmp_path, store_path=store_path)

@@ -308,6 +308,8 @@ def test_plain_output_contains_only_safe_key_value_lines(monkeypatch: Any, tmp_p
         "session_consumed=true",
         "access_token_received=true",
         "refresh_token_received=true",
+        "token_persisted=false",
+        "profile_id=default",
         "expires_in=3600",
         "scope=read",
     ]
@@ -590,6 +592,7 @@ def _invoke_exchange_code(*extra_args: str):
         RETURNED_CODE,
         "--state",
         RETURNED_STATE,
+        "--no-persist-token",
         *extra_args,
     ]
     return CliRunner().invoke(app, args)

@@ -24,10 +24,13 @@ from soundcloud_downloader.domain import (
     OAuthRedirectUri,
     OAuthSessionId,
     OAuthState,
+    OAuthTokenProfileId,
     SoundcloudDownloaderError,
+    StoredOAuthTokenSet,
 )
 from soundcloud_downloader.infrastructure import (
     EncryptedOAuthAuthorizationSessionStore,
+    EncryptedOAuthTokenStore,
     SafeAsyncHttpClient,
 )
 from soundcloud_downloader.infrastructure.soundcloud import OAuthTokenExchangeService
@@ -47,6 +50,8 @@ class OAuthExchangeCodeCliResult(BaseModel):
     session_consumed: bool
     access_token_received: bool
     refresh_token_received: bool
+    token_persisted: bool
+    profile_id: str
     expires_in: int | None = None
     scope: str | None = None
 
@@ -214,10 +219,26 @@ def exchange_code(
         Path | None,
         typer.Option("--env-file", help="Explicit settings env file."),
     ] = None,
-    store_path: Annotated[
+    session_store_path: Annotated[
         Path | None,
-        typer.Option("--store-path", help="Override OAuth session store path."),
+        typer.Option(
+            "--session-store-path",
+            "--store-path",
+            help="Override OAuth authorization session store path.",
+        ),
     ] = None,
+    token_store_path: Annotated[
+        Path | None,
+        typer.Option("--token-store-path", help="Override OAuth token store path."),
+    ] = None,
+    profile_id: Annotated[
+        str,
+        typer.Option("--profile-id", help="OAuth token profile ID."),
+    ] = "default",
+    persist_token: Annotated[
+        bool,
+        typer.Option("--persist-token/--no-persist-token", help="Persist received OAuth tokens."),
+    ] = True,
     allow_network: Annotated[
         bool | None,
         typer.Option(
@@ -244,12 +265,16 @@ def exchange_code(
     settings = load_settings(env_file=env_file)
     settings = _apply_exchange_code_settings_overrides(
         settings,
-        store_path=store_path,
+        session_store_path=session_store_path,
+        token_store_path=token_store_path,
         allow_network=allow_network,
         allow_filesystem_writes=allow_filesystem_writes,
         auth_base_url=auth_base_url,
     )
     _validate_exchange_code_settings(settings)
+    token_profile_id = OAuthTokenProfileId(value=profile_id)
+    if persist_token:
+        _validate_token_persistence_settings(settings)
 
     try:
         result = asyncio.run(
@@ -258,6 +283,8 @@ def exchange_code(
                 session_id=session_id,
                 code=code,
                 state=state,
+                profile_id=token_profile_id,
+                persist_token=persist_token,
             )
         )
     except (SoundcloudDownloaderError, ValueError):
@@ -272,8 +299,108 @@ def exchange_code(
     typer.echo(f"session_consumed={str(result.session_consumed).lower()}")
     typer.echo(f"access_token_received={str(result.access_token_received).lower()}")
     typer.echo(f"refresh_token_received={str(result.refresh_token_received).lower()}")
+    typer.echo(f"token_persisted={str(result.token_persisted).lower()}")
+    typer.echo(f"profile_id={result.profile_id}")
     typer.echo(f"expires_in={result.expires_in or ''}")
     typer.echo(f"scope={result.scope or ''}")
+
+
+@oauth_app.command("token-status")
+def token_status(
+    profile_id: Annotated[
+        str,
+        typer.Option("--profile-id", help="OAuth token profile ID."),
+    ] = "default",
+    token_store_path: Annotated[
+        Path | None,
+        typer.Option("--token-store-path", help="Override OAuth token store path."),
+    ] = None,
+    env_file: Annotated[
+        Path | None,
+        typer.Option("--env-file", help="Explicit settings env file."),
+    ] = None,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json/--plain", help="Print structured JSON or safe key/value lines."),
+    ] = True,
+) -> None:
+    settings = load_settings(env_file=env_file)
+    settings = _apply_token_store_overrides(
+        settings,
+        token_store_path=token_store_path,
+        allow_filesystem_writes=None,
+    )
+    _validate_token_store_configured(settings)
+    token_profile_id = OAuthTokenProfileId(value=profile_id)
+    try:
+        token_set = _build_encrypted_token_store(settings).get(token_profile_id)
+    except SoundcloudDownloaderError:
+        typer.echo("OAuth token status could not be read safely.", err=True)
+        raise typer.Exit(1) from None
+
+    payload = _token_status_payload(token_profile_id, token_set)
+    if json_output:
+        typer.echo(json.dumps(payload, indent=2, sort_keys=True))
+        return
+
+    typer.echo(f"profile_id={payload['profile_id']}")
+    typer.echo(f"token_present={str(payload['token_present']).lower()}")
+    access_token_expired = payload["access_token_expired"]
+    typer.echo(
+        "access_token_expired="
+        f"{'' if access_token_expired is None else str(access_token_expired).lower()}"
+    )
+    typer.echo(f"refresh_token_present={str(payload['refresh_token_present']).lower()}")
+    typer.echo(f"expires_at={payload['expires_at'] or ''}")
+    typer.echo(f"scope={payload['scope'] or ''}")
+
+
+@oauth_app.command("logout")
+def logout(
+    profile_id: Annotated[
+        str,
+        typer.Option("--profile-id", help="OAuth token profile ID."),
+    ] = "default",
+    token_store_path: Annotated[
+        Path | None,
+        typer.Option("--token-store-path", help="Override OAuth token store path."),
+    ] = None,
+    allow_filesystem_writes: Annotated[
+        bool | None,
+        typer.Option(
+            "--allow-filesystem-writes/--no-allow-filesystem-writes",
+            help="Override whether OAuth token deletion may write files.",
+        ),
+    ] = None,
+    env_file: Annotated[
+        Path | None,
+        typer.Option("--env-file", help="Explicit settings env file."),
+    ] = None,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json/--plain", help="Print structured JSON or safe key/value lines."),
+    ] = True,
+) -> None:
+    settings = load_settings(env_file=env_file)
+    settings = _apply_token_store_overrides(
+        settings,
+        token_store_path=token_store_path,
+        allow_filesystem_writes=allow_filesystem_writes,
+    )
+    _validate_token_persistence_settings(settings)
+    token_profile_id = OAuthTokenProfileId(value=profile_id)
+    try:
+        _build_encrypted_token_store(settings).delete(token_profile_id)
+    except SoundcloudDownloaderError:
+        typer.echo("OAuth logout could not be completed safely.", err=True)
+        raise typer.Exit(1) from None
+
+    payload = {"profile_id": token_profile_id.value, "logged_out": True}
+    if json_output:
+        typer.echo(json.dumps(payload, indent=2, sort_keys=True))
+        return
+    typer.echo(f"profile_id={token_profile_id.value}")
+    typer.echo("logged_out=true")
 
 
 async def _exchange_code_async(
@@ -282,7 +409,10 @@ async def _exchange_code_async(
     session_id: str,
     code: str,
     state: str,
+    profile_id: OAuthTokenProfileId,
+    persist_token: bool,
 ) -> OAuthExchangeCodeCliResult:
+    token_store = _build_encrypted_token_store(settings) if persist_token else None
     session_store = EncryptedOAuthAuthorizationSessionStore(settings)
     async with SafeAsyncHttpClient(settings) as http_client:
         workflow = build_oauth_token_exchange_workflow(
@@ -302,7 +432,18 @@ async def _exchange_code_async(
                 ),
             )
         )
-    return _build_exchange_code_cli_result(result)
+    if token_store is not None:
+        token_store.save(
+            StoredOAuthTokenSet.from_token_response(
+                profile_id=profile_id,
+                token_response=result.token_response,
+            )
+        )
+    return _build_exchange_code_cli_result(
+        result,
+        profile_id=profile_id,
+        token_persisted=token_store is not None,
+    )
 
 
 def build_oauth_token_exchange_workflow(
@@ -321,12 +462,17 @@ def build_oauth_token_exchange_workflow(
 
 def _build_exchange_code_cli_result(
     result: OAuthAuthorizationCodeExchangeWorkflowResult,
+    *,
+    profile_id: OAuthTokenProfileId,
+    token_persisted: bool,
 ) -> OAuthExchangeCodeCliResult:
     return OAuthExchangeCodeCliResult(
         session_id=result.session_id,
         session_consumed=result.consumed,
         access_token_received=True,
         refresh_token_received=result.token_response.refresh_token is not None,
+        token_persisted=token_persisted,
+        profile_id=profile_id.value,
         expires_in=result.token_response.expires_in,
         scope=result.token_response.scope,
     )
@@ -335,14 +481,17 @@ def _build_exchange_code_cli_result(
 def _apply_exchange_code_settings_overrides(
     settings: AppSettings,
     *,
-    store_path: Path | None,
+    session_store_path: Path | None,
+    token_store_path: Path | None,
     allow_network: bool | None,
     allow_filesystem_writes: bool | None,
     auth_base_url: str | None,
 ) -> AppSettings:
     updates: dict[str, object] = {}
-    if store_path is not None:
-        updates["oauth_session_store_path"] = store_path
+    if session_store_path is not None:
+        updates["oauth_session_store_path"] = session_store_path
+    if token_store_path is not None:
+        updates["oauth_token_store_path"] = token_store_path
     if allow_network is not None:
         updates["allow_network"] = allow_network
     if allow_filesystem_writes is not None:
@@ -364,6 +513,62 @@ def _validate_exchange_code_settings(settings: AppSettings) -> None:
     if not settings.allow_network:
         typer.echo("Network access must be enabled for token exchange.", err=True)
         raise typer.Exit(1)
+
+
+def _validate_token_persistence_settings(settings: AppSettings) -> None:
+    _validate_token_store_configured(settings)
+    if not settings.allow_filesystem_writes:
+        typer.echo("Filesystem writes must be enabled to persist OAuth tokens.", err=True)
+        raise typer.Exit(1)
+
+
+def _validate_token_store_configured(settings: AppSettings) -> None:
+    if settings.oauth_token_encryption_key is None:
+        typer.echo("Persistent OAuth token storage is not configured.", err=True)
+        raise typer.Exit(1)
+
+
+def _build_encrypted_token_store(settings: AppSettings) -> EncryptedOAuthTokenStore:
+    return EncryptedOAuthTokenStore(settings)
+
+
+def _apply_token_store_overrides(
+    settings: AppSettings,
+    *,
+    token_store_path: Path | None,
+    allow_filesystem_writes: bool | None,
+) -> AppSettings:
+    updates: dict[str, object] = {}
+    if token_store_path is not None:
+        updates["oauth_token_store_path"] = token_store_path
+    if allow_filesystem_writes is not None:
+        updates["allow_filesystem_writes"] = allow_filesystem_writes
+    if not updates:
+        return settings
+    return settings.model_copy(update=updates)
+
+
+def _token_status_payload(
+    profile_id: OAuthTokenProfileId,
+    token_set: StoredOAuthTokenSet | None,
+) -> dict[str, object]:
+    if token_set is None:
+        return {
+            "profile_id": profile_id.value,
+            "token_present": False,
+            "access_token_expired": None,
+            "refresh_token_present": False,
+            "expires_at": None,
+            "scope": None,
+        }
+    return {
+        "profile_id": profile_id.value,
+        "token_present": True,
+        "access_token_expired": token_set.is_expired(),
+        "refresh_token_present": token_set.refresh_token is not None,
+        "expires_at": token_set.expires_at.isoformat() if token_set.expires_at is not None else None,
+        "scope": token_set.scope,
+    }
 
 
 def _apply_create_session_settings_overrides(
