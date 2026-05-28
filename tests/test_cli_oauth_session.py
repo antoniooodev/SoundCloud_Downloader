@@ -74,10 +74,10 @@ def test_json_output_status_is_pending() -> None:
     assert payload["status"] == "pending"
 
 
-def test_json_output_contains_code_verifier_required_for_token_exchange_true() -> None:
+def test_json_output_does_not_include_code_verifier_required_for_token_exchange() -> None:
     payload = _session_payload()
 
-    assert payload["code_verifier_required_for_token_exchange"] is True
+    assert "code_verifier_required_for_token_exchange" not in payload
 
 
 def test_json_output_contains_in_memory_warning() -> None:
