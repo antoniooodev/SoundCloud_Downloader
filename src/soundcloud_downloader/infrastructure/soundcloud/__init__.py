@@ -4,6 +4,11 @@ from soundcloud_downloader.infrastructure.soundcloud.api_contract import (
     SoundCloudApiRequest,
 )
 from soundcloud_downloader.infrastructure.soundcloud.http_resolver import SoundCloudHttpResolver
+from soundcloud_downloader.infrastructure.soundcloud.hls_manifest_service import (
+    SoundCloudHLSManifestRetrievalError,
+    SoundCloudHLSManifestService,
+    redact_hls_manifest_request,
+)
 from soundcloud_downloader.infrastructure.soundcloud.oauth_token_exchange import (
     OAuthTokenExchangeError,
     OAuthTokenExchangeService,
@@ -32,10 +37,13 @@ __all__ = [
     "SoundCloudAccessToken",
     "SoundCloudApiEndpoint",
     "SoundCloudApiRequest",
+    "SoundCloudHLSManifestRetrievalError",
+    "SoundCloudHLSManifestService",
     "SoundCloudHttpResolver",
     "SoundCloudResolveRequestBuilder",
     "SoundCloudResponseMapper",
     "SoundCloudTranscodingEndpointError",
     "SoundCloudTranscodingEndpointService",
     "redact_resolved_stream",
+    "redact_hls_manifest_request",
 ]

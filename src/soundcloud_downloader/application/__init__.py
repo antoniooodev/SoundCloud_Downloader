@@ -34,6 +34,12 @@ from soundcloud_downloader.application.reconstruction_planner import (
     ReconstructionPlanner,
     ReconstructionPlanRequest,
 )
+from soundcloud_downloader.application.resolved_stream_analysis_workflow import (
+    HLSManifestFetcherPort,
+    ResolvedStreamAnalysisRequest,
+    ResolvedStreamAnalysisResult,
+    ResolvedStreamAnalysisWorkflow,
+)
 from soundcloud_downloader.application.resolver_input import ResolverInputNormalizer
 from soundcloud_downloader.application.resolver_service import (
     ResolverService,
@@ -52,6 +58,7 @@ from soundcloud_downloader.application.transcoding_endpoint import (
 
 __all__ = [
     "HLSManifestAnalyzer",
+    "HLSManifestFetcherPort",
     "CreateOAuthAuthorizationSessionRequest",
     "InMemoryOAuthAuthorizationSessionStore",
     "OAuthAuthorizationSessionService",
@@ -69,6 +76,9 @@ __all__ = [
     "ReconstructionPlan",
     "ReconstructionPlanner",
     "ReconstructionPlanRequest",
+    "ResolvedStreamAnalysisRequest",
+    "ResolvedStreamAnalysisResult",
+    "ResolvedStreamAnalysisWorkflow",
     "ResolverInputNormalizer",
     "ResolverService",
     "ResolverServiceRequest",
