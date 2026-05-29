@@ -1,3 +1,7 @@
+from soundcloud_downloader.application.artifact_storage import (
+    ArtifactStoragePort,
+    TemporaryWorkspacePort,
+)
 from soundcloud_downloader.application.hls_manifest_analyzer import HLSManifestAnalyzer
 from soundcloud_downloader.application.metadata_normalizer import (
     SoundCloudMetadataNormalizationError,
@@ -59,6 +63,7 @@ from soundcloud_downloader.application.transcoding_endpoint import (
 __all__ = [
     "HLSManifestAnalyzer",
     "HLSManifestFetcherPort",
+    "ArtifactStoragePort",
     "CreateOAuthAuthorizationSessionRequest",
     "InMemoryOAuthAuthorizationSessionStore",
     "OAuthAuthorizationSessionService",
@@ -89,6 +94,7 @@ __all__ = [
     "StreamAnalysisRequest",
     "StreamAnalysisResult",
     "StreamAnalysisService",
+    "TemporaryWorkspacePort",
     "redact_refresh_token_request",
     "redact_token_exchange_request",
     "redact_transcoding_endpoint_request",

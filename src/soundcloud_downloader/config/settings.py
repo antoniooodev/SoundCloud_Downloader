@@ -42,6 +42,8 @@ class AppSettings(BaseSettings):
     enable_go_plus_mode: bool = True
     allow_network: bool = False
     allow_filesystem_writes: bool = False
+    artifact_storage_root: Path = Path("data/artifacts")
+    artifact_temp_root: Path = Path("data/tmp")
     oauth_session_store_path: Path = Path("data/oauth_sessions.enc")
     oauth_session_encryption_key: SecretStr | None = None
     oauth_token_store_path: Path = Path("data/oauth_tokens.enc")
@@ -51,6 +53,22 @@ class AppSettings(BaseSettings):
     soundcloud_resolve_endpoint: str | None = None
     soundcloud_api_base_url: str = "https://api.soundcloud.com"
     soundcloud_auth_base_url: str = "https://secure.soundcloud.com"
+
+    @field_validator("artifact_storage_root", "artifact_temp_root", mode="before")
+    @classmethod
+    def validate_artifact_root_path(cls, value: object) -> object:
+        if value == "":
+            raise ValueError("Artifact root path must not be empty.")
+        return value
+
+    @field_validator("artifact_storage_root", "artifact_temp_root")
+    @classmethod
+    def validate_artifact_root_path_type(cls, value: Path) -> Path:
+        if not isinstance(value, Path):
+            raise ValueError("Artifact root path must be a filesystem path.")
+        if str(value) == "":
+            raise ValueError("Artifact root path must not be empty.")
+        return value
 
     @field_validator("oauth_session_store_path")
     @classmethod
