@@ -26,6 +26,12 @@ from soundcloud_downloader.domain.hls_segments import (
     HLSSegmentUrl,
     redact_hls_segment_plan,
 )
+from soundcloud_downloader.domain.hls_assembly import (
+    HLSMediaAssemblyInput,
+    HLSMediaAssemblyResult,
+    HLSMediaAssemblyStatus,
+    redact_hls_media_assembly_result,
+)
 from soundcloud_downloader.domain.hls_staging import (
     HLSSegmentFetchStatus,
     HLSSegmentStagingResult,
@@ -113,6 +119,9 @@ __all__ = [
     "HLSByteRange",
     "HLSInitializationMapReference",
     "HLSInitializationMapUrl",
+    "HLSMediaAssemblyInput",
+    "HLSMediaAssemblyResult",
+    "HLSMediaAssemblyStatus",
     "HLSManifestAnalysis",
     "HLSManifestKind",
     "HLSSegmentPlan",
@@ -173,5 +182,6 @@ __all__ = [
     "TrackAccessContext",
     "redact_hls_segment_plan",
     "redact_hls_staging_result",
+    "redact_hls_media_assembly_result",
     "StagedHLSSegment",
 ]

@@ -9,6 +9,10 @@ from soundcloud_downloader.infrastructure.soundcloud.hls_manifest_service import
     SoundCloudHLSManifestService,
     redact_hls_manifest_request,
 )
+from soundcloud_downloader.infrastructure.soundcloud.hls_media_assembler import (
+    HLSMediaAssembler,
+    HLSMediaAssemblyError,
+)
 from soundcloud_downloader.infrastructure.soundcloud.hls_segment_fetcher import (
     HLSSegmentFetcher,
     HLSSegmentFetchError,
@@ -42,6 +46,8 @@ __all__ = [
     "SoundCloudAccessToken",
     "SoundCloudApiEndpoint",
     "SoundCloudApiRequest",
+    "HLSMediaAssembler",
+    "HLSMediaAssemblyError",
     "HLSSegmentFetcher",
     "HLSSegmentFetchError",
     "SoundCloudHLSManifestRetrievalError",
