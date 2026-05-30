@@ -17,6 +17,15 @@ from soundcloud_downloader.domain.artifact import (
     ArtifactRelativePath,
     ChecksumAlgorithm,
 )
+from soundcloud_downloader.domain.hls_segments import (
+    HLSByteRange,
+    HLSInitializationMapReference,
+    HLSInitializationMapUrl,
+    HLSSegmentPlan,
+    HLSSegmentReference,
+    HLSSegmentUrl,
+    redact_hls_segment_plan,
+)
 from soundcloud_downloader.domain.media import MediaSource, TrackAccessContext
 from soundcloud_downloader.domain.metadata import (
     SoundCloudArtworkUrl,
@@ -95,8 +104,14 @@ __all__ = [
     "DRMStatus",
     "ErrorCode",
     "HLSDrmIndicator",
+    "HLSByteRange",
+    "HLSInitializationMapReference",
+    "HLSInitializationMapUrl",
     "HLSManifestAnalysis",
     "HLSManifestKind",
+    "HLSSegmentPlan",
+    "HLSSegmentReference",
+    "HLSSegmentUrl",
     "MediaCodec",
     "MediaContainer",
     "MediaSource",
@@ -148,4 +163,5 @@ __all__ = [
     "SourceProtocol",
     "StoredOAuthTokenSet",
     "TrackAccessContext",
+    "redact_hls_segment_plan",
 ]

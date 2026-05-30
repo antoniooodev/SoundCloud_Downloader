@@ -3,6 +3,11 @@ from soundcloud_downloader.application.artifact_storage import (
     TemporaryWorkspacePort,
 )
 from soundcloud_downloader.application.hls_manifest_analyzer import HLSManifestAnalyzer
+from soundcloud_downloader.application.hls_segment_planner import (
+    HLSSegmentPlanner,
+    HLSSegmentPlanningError,
+    HLSSegmentPlanningRequest,
+)
 from soundcloud_downloader.application.metadata_normalizer import (
     SoundCloudMetadataNormalizationError,
     SoundCloudMetadataNormalizer,
@@ -63,6 +68,9 @@ from soundcloud_downloader.application.transcoding_endpoint import (
 __all__ = [
     "HLSManifestAnalyzer",
     "HLSManifestFetcherPort",
+    "HLSSegmentPlanner",
+    "HLSSegmentPlanningError",
+    "HLSSegmentPlanningRequest",
     "ArtifactStoragePort",
     "CreateOAuthAuthorizationSessionRequest",
     "InMemoryOAuthAuthorizationSessionStore",
