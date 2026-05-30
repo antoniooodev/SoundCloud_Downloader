@@ -2,6 +2,12 @@ from soundcloud_downloader.application.artifact_storage import (
     ArtifactStoragePort,
     TemporaryWorkspacePort,
 )
+from soundcloud_downloader.application.ffmpeg import (
+    FFMPEGCommand,
+    FFMPEGResult,
+    FFMPEGRunnerPort,
+    redact_ffmpeg_command,
+)
 from soundcloud_downloader.application.hls_manifest_analyzer import HLSManifestAnalyzer
 from soundcloud_downloader.application.hls_segment_planner import (
     HLSSegmentPlanner,
@@ -72,6 +78,9 @@ __all__ = [
     "HLSSegmentPlanningError",
     "HLSSegmentPlanningRequest",
     "ArtifactStoragePort",
+    "FFMPEGCommand",
+    "FFMPEGResult",
+    "FFMPEGRunnerPort",
     "CreateOAuthAuthorizationSessionRequest",
     "InMemoryOAuthAuthorizationSessionStore",
     "OAuthAuthorizationSessionService",
@@ -103,6 +112,7 @@ __all__ = [
     "StreamAnalysisResult",
     "StreamAnalysisService",
     "TemporaryWorkspacePort",
+    "redact_ffmpeg_command",
     "redact_refresh_token_request",
     "redact_token_exchange_request",
     "redact_transcoding_endpoint_request",

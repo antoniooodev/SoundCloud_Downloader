@@ -81,6 +81,14 @@ from soundcloud_downloader.domain.oauth_token_store import (
 )
 from soundcloud_downloader.domain.policy import PolicyDecision
 from soundcloud_downloader.domain.reconstruction_policy import ReconstructionPolicyEngine
+from soundcloud_downloader.domain.remux import (
+    RemuxInputArtifact,
+    RemuxOutputArtifact,
+    RemuxOutputFormat,
+    RemuxResult,
+    RemuxStatus,
+    redact_remux_result,
+)
 from soundcloud_downloader.domain.resolver import (
     NormalizedResolverInput,
     ResolverInputType,
@@ -158,6 +166,11 @@ __all__ = [
     "OutputProfile",
     "PolicyDecision",
     "ReconstructionPolicyEngine",
+    "RemuxInputArtifact",
+    "RemuxOutputArtifact",
+    "RemuxOutputFormat",
+    "RemuxResult",
+    "RemuxStatus",
     "ResolverInputType",
     "SoundcloudDownloaderError",
     "SoundCloudArtworkUrl",
@@ -183,5 +196,6 @@ __all__ = [
     "redact_hls_segment_plan",
     "redact_hls_staging_result",
     "redact_hls_media_assembly_result",
+    "redact_remux_result",
     "StagedHLSSegment",
 ]

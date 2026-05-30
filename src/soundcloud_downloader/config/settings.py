@@ -44,6 +44,8 @@ class AppSettings(BaseSettings):
     allow_filesystem_writes: bool = False
     artifact_storage_root: Path = Path("data/artifacts")
     artifact_temp_root: Path = Path("data/tmp")
+    ffmpeg_binary: str = "ffmpeg"
+    ffmpeg_timeout_seconds: int = Field(default=300, gt=0)
     oauth_session_store_path: Path = Path("data/oauth_sessions.enc")
     oauth_session_encryption_key: SecretStr | None = None
     oauth_token_store_path: Path = Path("data/oauth_tokens.enc")
@@ -69,6 +71,17 @@ class AppSettings(BaseSettings):
         if str(value) == "":
             raise ValueError("Artifact root path must not be empty.")
         return value
+
+    @field_validator("ffmpeg_binary")
+    @classmethod
+    def validate_ffmpeg_binary(cls, value: str) -> str:
+        stripped = value.strip()
+        if stripped == "":
+            raise ValueError("ffmpeg binary must not be empty.")
+        parts = Path(stripped).parts
+        if ".." in parts:
+            raise ValueError("ffmpeg binary must not contain path traversal.")
+        return stripped
 
     @field_validator("oauth_session_store_path")
     @classmethod

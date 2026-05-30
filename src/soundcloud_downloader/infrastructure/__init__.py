@@ -6,6 +6,12 @@ from soundcloud_downloader.infrastructure.http import (
     NetworkDisabledError,
     SafeAsyncHttpClient,
 )
+from soundcloud_downloader.infrastructure.media import (
+    FFMPEGExecutionError,
+    M4ARemuxer,
+    M4ARemuxError,
+    SubprocessFFMPEGRunner,
+)
 from soundcloud_downloader.infrastructure.observability import (
     REDACTED_VALUE,
     SENSITIVE_FIELD_NAMES,
@@ -44,14 +50,18 @@ __all__ = [
     "REDACTED_VALUE",
     "SENSITIVE_FIELD_NAMES",
     "SafeAsyncHttpClient",
+    "FFMPEGExecutionError",
     "LocalArtifactStorage",
     "LocalArtifactStorageError",
     "LocalTemporaryWorkspace",
+    "M4ARemuxer",
+    "M4ARemuxError",
     "EncryptedOAuthAuthorizationSessionStore",
     "EncryptedOAuthTokenStore",
     "PersistentAccessTokenProvider",
     "SoundCloudHttpResolver",
     "SoundCloudResponseMapper",
+    "SubprocessFFMPEGRunner",
     "TemporaryWorkspaceError",
     "configure_logging",
     "compute_sha256_bytes",
