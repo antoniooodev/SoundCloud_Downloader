@@ -17,6 +17,15 @@ from soundcloud_downloader.domain.artifact import (
     ArtifactRelativePath,
     ChecksumAlgorithm,
 )
+from soundcloud_downloader.domain.audio_export import (
+    AudioArtworkArtifact,
+    AudioExportFormat,
+    AudioExportMetadata,
+    AudioExportRequest,
+    AudioExportResult,
+    AudioExportStatus,
+    redact_audio_export_result,
+)
 from soundcloud_downloader.domain.hls_segments import (
     HLSByteRange,
     HLSInitializationMapReference,
@@ -120,6 +129,12 @@ __all__ = [
     "ArtifactKind",
     "ArtifactMetadata",
     "ArtifactRelativePath",
+    "AudioArtworkArtifact",
+    "AudioExportFormat",
+    "AudioExportMetadata",
+    "AudioExportRequest",
+    "AudioExportResult",
+    "AudioExportStatus",
     "ChecksumAlgorithm",
     "DRMStatus",
     "ErrorCode",
@@ -196,6 +211,7 @@ __all__ = [
     "redact_hls_segment_plan",
     "redact_hls_staging_result",
     "redact_hls_media_assembly_result",
+    "redact_audio_export_result",
     "redact_remux_result",
     "StagedHLSSegment",
 ]
