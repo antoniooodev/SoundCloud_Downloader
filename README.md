@@ -98,6 +98,12 @@ soundcloud-downloader download track "https://soundcloud.com/example/track" --fo
 
 See [docs/SMOKE_TEST.md](docs/SMOKE_TEST.md) for a local MVP smoke-test flow.
 
+## Project notes
+
+- See [CHANGELOG.md](CHANGELOG.md) for MVP history.
+- See [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md) for current
+  limitations.
+
 ## OAuth setup
 
 The OAuth helper commands are the supported way to bootstrap and maintain
