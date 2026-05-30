@@ -16,6 +16,7 @@ from soundcloud_downloader.application import (
 from soundcloud_downloader.cli.main import app
 from soundcloud_downloader.config import AppSettings
 from soundcloud_downloader.domain import (
+    ErrorCode,
     OAuthAccessToken,
     OAuthAuthorizationCode,
     OAuthAuthorizationSession,
@@ -36,6 +37,7 @@ from soundcloud_downloader.infrastructure import (
     EncryptedOAuthAuthorizationSessionStore,
     EncryptedOAuthTokenStore,
 )
+from soundcloud_downloader.infrastructure.soundcloud import OAuthTokenExchangeError
 
 
 SESSION_ID = "session-1"
@@ -49,8 +51,14 @@ REFRESH_TOKEN = "refresh-token-private"
 
 
 class FakeTokenExchange:
-    def __init__(self, *, refresh_token: str | None = REFRESH_TOKEN) -> None:
+    def __init__(
+        self,
+        *,
+        refresh_token: str | None = REFRESH_TOKEN,
+        error: OAuthTokenExchangeError | None = None,
+    ) -> None:
         self.refresh_token = refresh_token
+        self.error = error
         self.calls: list[dict[str, object]] = []
 
     async def exchange_authorization_code(
@@ -71,6 +79,8 @@ class FakeTokenExchange:
                 "code_verifier": code_verifier,
             }
         )
+        if self.error is not None:
+            raise self.error
         return OAuthTokenResponse(
             access_token=OAuthAccessToken(value=SecretStr(ACCESS_TOKEN)),
             refresh_token=(
@@ -479,6 +489,27 @@ def test_tests_write_only_inside_pytest_tmp_path(monkeypatch: Any, tmp_path: Pat
     assert store_path.is_file()
 
 
+def test_exchange_code_token_response_validation_failure_output_is_safe(
+    monkeypatch: Any,
+    tmp_path: Path,
+) -> None:
+    _install_fake_workflow(
+        monkeypatch,
+        error=OAuthTokenExchangeError(
+            ErrorCode.UNKNOWN_UNSAFE,
+            'OAuth token response validation failed. invalid_fields=["token_type"]',
+        ),
+    )
+    env_file, _session_path, _session_key, _token_path, token_key = _prepare_session(tmp_path)
+
+    result = _invoke_exchange_code("--env-file", str(env_file))
+
+    assert result.exit_code != 0
+    assert "OAuth token response validation failed." in result.output
+    assert 'invalid_fields=["token_type"]' in result.output
+    _assert_output_is_safe(result.output, token_key=token_key)
+
+
 def _successful_exchange(
     monkeypatch: Any,
     tmp_path: Path,
@@ -491,8 +522,12 @@ def _successful_exchange(
     return result, token_path, token_key
 
 
-def _install_fake_workflow(monkeypatch: Any) -> FakeTokenExchange:
-    fake_exchange = FakeTokenExchange()
+def _install_fake_workflow(
+    monkeypatch: Any,
+    *,
+    error: OAuthTokenExchangeError | None = None,
+) -> FakeTokenExchange:
+    fake_exchange = FakeTokenExchange(error=error)
     monkeypatch.setattr(oauth_cli, "build_oauth_token_exchange_workflow", WorkflowFactory(fake_exchange))
     return fake_exchange
 

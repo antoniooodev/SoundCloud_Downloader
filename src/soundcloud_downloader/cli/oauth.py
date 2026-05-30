@@ -33,7 +33,10 @@ from soundcloud_downloader.infrastructure import (
     EncryptedOAuthTokenStore,
     SafeAsyncHttpClient,
 )
-from soundcloud_downloader.infrastructure.soundcloud import OAuthTokenExchangeService
+from soundcloud_downloader.infrastructure.soundcloud import (
+    OAuthTokenExchangeError,
+    OAuthTokenExchangeService,
+)
 
 
 oauth_app = typer.Typer(help="OAuth helper commands.")
@@ -287,6 +290,9 @@ def exchange_code(
                 persist_token=persist_token,
             )
         )
+    except OAuthTokenExchangeError as exc:
+        typer.echo(exc.message, err=True)
+        raise typer.Exit(1) from None
     except (SoundcloudDownloaderError, ValueError):
         typer.echo("OAuth session validation failed.", err=True)
         raise typer.Exit(1) from None

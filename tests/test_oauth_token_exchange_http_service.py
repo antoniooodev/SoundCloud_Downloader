@@ -32,6 +32,8 @@ RAW_CODE_VERIFIER = "A" * 64
 RAW_CLIENT_SECRET = "dummy-client-secret"
 RAW_ACCESS_TOKEN = "dummy-access-token"
 RAW_REFRESH_TOKEN = "dummy-refresh-token"
+FAKE_ACCESS_TOKEN = "FAKE_ACCESS_TOKEN"
+FAKE_REFRESH_TOKEN = "FAKE_REFRESH_TOKEN"
 
 
 def run(coro: Awaitable[object]) -> object:
@@ -59,6 +61,68 @@ def test_successful_mocked_token_response_returns_oauth_token_response() -> None
     response = run(_exchange_with_response(_success_response_body()))
 
     assert isinstance(response, OAuthTokenResponse)
+
+
+def test_real_like_soundcloud_token_response_with_bearer_and_empty_scope_is_accepted() -> None:
+    response = run(
+        _exchange_with_response(
+            json.dumps(
+                {
+                    "access_token": FAKE_ACCESS_TOKEN,
+                    "refresh_token": FAKE_REFRESH_TOKEN,
+                    "expires_in": 3599,
+                    "token_type": "Bearer",
+                    "scope": "",
+                }
+            )
+        )
+    )
+
+    assert isinstance(response, OAuthTokenResponse)
+    assert response.expires_in == 3599
+    assert response.scope is None
+    assert response.access_token.token_type == "OAuth"
+
+
+@pytest.mark.parametrize("token_type", ["bearer", "OAuth"])
+def test_observed_soundcloud_token_type_variants_are_accepted(token_type: str) -> None:
+    response = run(
+        _exchange_with_response(
+            json.dumps(
+                {
+                    "access_token": FAKE_ACCESS_TOKEN,
+                    "refresh_token": FAKE_REFRESH_TOKEN,
+                    "expires_in": 3600,
+                    "token_type": token_type,
+                }
+            )
+        )
+    )
+
+    assert isinstance(response, OAuthTokenResponse)
+    assert response.access_token.token_type == "OAuth"
+
+
+def test_extra_response_fields_are_ignored_without_leaking_values() -> None:
+    response = run(
+        _exchange_with_response(
+            json.dumps(
+                {
+                    "access_token": FAKE_ACCESS_TOKEN,
+                    "refresh_token": FAKE_REFRESH_TOKEN,
+                    "expires_in": 3600,
+                    "token_type": "Bearer",
+                    "scope": "",
+                    "extra_token": "EXTRA_SECRET_VALUE",
+                }
+            )
+        )
+    )
+    dumped = response.model_dump()
+
+    assert "extra_token" not in dumped
+    assert "EXTRA_SECRET_VALUE" not in repr(response)
+    assert "EXTRA_SECRET_VALUE" not in str(dumped)
 
 
 def test_returned_oauth_token_response_repr_does_not_expose_access_token() -> None:
@@ -179,13 +243,50 @@ def test_invalid_json_raises_oauth_token_exchange_error() -> None:
 
 
 def test_2xx_response_missing_access_token_raises_oauth_token_exchange_error() -> None:
-    with pytest.raises(OAuthTokenExchangeError):
+    with pytest.raises(OAuthTokenExchangeError, match=r'invalid_fields=\["access_token"\]'):
         run(_exchange_with_response(json.dumps({"refresh_token": RAW_REFRESH_TOKEN})))
 
 
+def test_2xx_response_missing_refresh_token_is_accepted() -> None:
+    response = run(
+        _exchange_with_response(
+            json.dumps(
+                {
+                    "access_token": RAW_ACCESS_TOKEN,
+                    "expires_in": 3600,
+                    "token_type": "Bearer",
+                }
+            )
+        )
+    )
+
+    assert response.refresh_token is None
+
+
 def test_non_positive_expires_in_response_raises_oauth_token_exchange_error() -> None:
-    with pytest.raises(OAuthTokenExchangeError):
+    with pytest.raises(OAuthTokenExchangeError, match=r'invalid_fields=\["expires_in"\]'):
         run(_exchange_with_response(_success_response_body(expires_in=0)))
+
+
+def test_invalid_token_type_response_raises_safe_oauth_token_exchange_error() -> None:
+    with pytest.raises(OAuthTokenExchangeError) as exc_info:
+        run(
+            _exchange_with_response(
+                json.dumps(
+                    {
+                        "access_token": RAW_ACCESS_TOKEN,
+                        "refresh_token": RAW_REFRESH_TOKEN,
+                        "expires_in": 3600,
+                        "token_type": "Unsupported",
+                    }
+                )
+            )
+        )
+
+    message = str(exc_info.value)
+    assert 'invalid_fields=["token_type"]' in message
+    assert RAW_ACCESS_TOKEN not in message
+    assert RAW_REFRESH_TOKEN not in message
 
 
 def test_tests_perform_no_real_network_calls(monkeypatch: Any) -> None:

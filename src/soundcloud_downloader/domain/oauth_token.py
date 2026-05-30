@@ -61,9 +61,9 @@ class OAuthAccessToken(BaseModel):
     @field_validator("token_type")
     @classmethod
     def validate_token_type(cls, value: str) -> str:
-        if value != "OAuth":
-            raise ValueError("OAuth access token type must be 'OAuth'.")
-        return value
+        if value == "OAuth" or value.lower() == "bearer":
+            return "OAuth"
+        raise ValueError("OAuth access token type must be 'OAuth', 'Bearer', or 'bearer'.")
 
     @field_serializer("value", when_used="always")
     def serialize_value(self, value: SecretStr) -> str:
