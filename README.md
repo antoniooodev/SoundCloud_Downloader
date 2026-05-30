@@ -104,6 +104,13 @@ See [docs/SMOKE_TEST.md](docs/SMOKE_TEST.md) for a local MVP smoke-test flow.
 - See [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md) for current
   limitations.
 
+## Contributing and architecture
+
+- See [CONTRIBUTING.md](CONTRIBUTING.md) for development and contribution
+  rules.
+- See [docs/ARCHITECTURE_MAP.md](docs/ARCHITECTURE_MAP.md) for a concise
+  module map.
+
 ## OAuth setup
 
 The OAuth helper commands are the supported way to bootstrap and maintain
