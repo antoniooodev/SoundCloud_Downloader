@@ -26,6 +26,12 @@ from soundcloud_downloader.domain.hls_segments import (
     HLSSegmentUrl,
     redact_hls_segment_plan,
 )
+from soundcloud_downloader.domain.hls_staging import (
+    HLSSegmentFetchStatus,
+    HLSSegmentStagingResult,
+    StagedHLSSegment,
+    redact_hls_staging_result,
+)
 from soundcloud_downloader.domain.media import MediaSource, TrackAccessContext
 from soundcloud_downloader.domain.metadata import (
     SoundCloudArtworkUrl,
@@ -111,6 +117,8 @@ __all__ = [
     "HLSManifestKind",
     "HLSSegmentPlan",
     "HLSSegmentReference",
+    "HLSSegmentFetchStatus",
+    "HLSSegmentStagingResult",
     "HLSSegmentUrl",
     "MediaCodec",
     "MediaContainer",
@@ -164,4 +172,6 @@ __all__ = [
     "StoredOAuthTokenSet",
     "TrackAccessContext",
     "redact_hls_segment_plan",
+    "redact_hls_staging_result",
+    "StagedHLSSegment",
 ]

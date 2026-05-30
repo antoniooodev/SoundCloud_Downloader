@@ -118,6 +118,7 @@ class SafeAsyncHttpClient:
                 status_code=response.status_code,
                 headers=dict(response.headers),
                 text=response.text,
+                content=response.content,
                 url_redacted=redact_url(str(response.url)),
             )
 

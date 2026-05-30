@@ -51,6 +51,7 @@ class HttpResponse(BaseModel):
     status_code: int = Field(ge=100, le=599)
     headers: Mapping[str, str] = Field(default_factory=dict)
     text: str
+    content: bytes = b""
     url_redacted: str
 
     @field_validator("url_redacted")

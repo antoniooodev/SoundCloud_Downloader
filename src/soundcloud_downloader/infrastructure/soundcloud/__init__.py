@@ -9,6 +9,11 @@ from soundcloud_downloader.infrastructure.soundcloud.hls_manifest_service import
     SoundCloudHLSManifestService,
     redact_hls_manifest_request,
 )
+from soundcloud_downloader.infrastructure.soundcloud.hls_segment_fetcher import (
+    HLSSegmentFetcher,
+    HLSSegmentFetchError,
+    redact_hls_segment_request,
+)
 from soundcloud_downloader.infrastructure.soundcloud.oauth_token_exchange import (
     OAuthTokenExchangeError,
     OAuthTokenExchangeService,
@@ -37,6 +42,8 @@ __all__ = [
     "SoundCloudAccessToken",
     "SoundCloudApiEndpoint",
     "SoundCloudApiRequest",
+    "HLSSegmentFetcher",
+    "HLSSegmentFetchError",
     "SoundCloudHLSManifestRetrievalError",
     "SoundCloudHLSManifestService",
     "SoundCloudHttpResolver",
@@ -46,4 +53,5 @@ __all__ = [
     "SoundCloudTranscodingEndpointService",
     "redact_resolved_stream",
     "redact_hls_manifest_request",
+    "redact_hls_segment_request",
 ]
