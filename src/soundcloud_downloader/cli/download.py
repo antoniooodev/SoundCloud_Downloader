@@ -36,6 +36,7 @@ from soundcloud_downloader.infrastructure.oauth import (
     AutoRefreshingAccessTokenProvider,
     EncryptedOAuthTokenStore,
 )
+from soundcloud_downloader.infrastructure.observability import configure_logging
 from soundcloud_downloader.infrastructure.soundcloud import (
     HLSMediaAssembler,
     HLSSegmentFetcher,
@@ -128,6 +129,7 @@ def download_track(
         allow_filesystem_writes=allow_filesystem_writes,
     )
     _validate_settings(settings)
+    configure_logging(settings)
 
     token_profile_id = OAuthTokenProfileId(value=profile_id)
     effective_output_profile = output_profile or _FORMAT_TO_OUTPUT_PROFILE[output_format]
@@ -174,13 +176,21 @@ async def _download_track_async(
     request: TrackDownloadRequest,
     profile_id: OAuthTokenProfileId,
 ) -> TrackDownloadResult:
-    async with SafeAsyncHttpClient(settings=settings) as http_client:
+    async with build_safe_http_client(settings) as http_client:
         workflow = build_track_download_workflow(
             settings,
             profile_id=profile_id,
             http_client=http_client,
         )
         return await workflow.download_track(request)
+
+
+def build_safe_http_client(settings: AppSettings) -> SafeAsyncHttpClient:
+    return SafeAsyncHttpClient(settings=settings)
+
+
+def build_ffmpeg_runner(settings: AppSettings) -> SubprocessFFMPEGRunner:
+    return SubprocessFFMPEGRunner(settings)
 
 
 def build_track_download_workflow(
@@ -213,7 +223,7 @@ def build_track_download_workflow(
     workspace = LocalTemporaryWorkspace(settings)
     segment_fetcher = HLSSegmentFetcher(http_client=http_client, storage=storage)
     media_assembler = HLSMediaAssembler(storage=storage)
-    ffmpeg_runner = SubprocessFFMPEGRunner(settings)
+    ffmpeg_runner = build_ffmpeg_runner(settings)
     m4a_remuxer = M4ARemuxer(
         settings=settings,
         storage=storage,
