@@ -1,6 +1,7 @@
 import typer
 
 from soundcloud_downloader import __version__
+from soundcloud_downloader.cli.doctor import doctor
 from soundcloud_downloader.cli.download import download_app
 from soundcloud_downloader.cli.oauth import oauth_app
 from soundcloud_downloader.cli.policy import policy_app
@@ -16,6 +17,7 @@ app.add_typer(oauth_app, name="oauth")
 app.add_typer(policy_app, name="policy")
 app.add_typer(plan_app, name="plan")
 app.add_typer(resolver_app, name="resolver")
+app.command("doctor", help="Inspect local configuration before running downloads.")(doctor)
 
 
 @app.callback()
