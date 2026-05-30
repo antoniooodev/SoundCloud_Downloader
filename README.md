@@ -94,6 +94,9 @@ soundcloud-downloader doctor
 soundcloud-downloader download track "https://soundcloud.com/example/track" --format m4a
 ```
 
+See [docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md) for a concise command
+reference.
+
 ## Smoke testing
 
 See [docs/SMOKE_TEST.md](docs/SMOKE_TEST.md) for a local MVP smoke-test flow.
