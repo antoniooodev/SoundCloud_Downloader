@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Create virtual environment
+        run: python -m venv .venv
+
+      - name: Install development dependencies
+        run: PYTHON=.venv/bin/python make install-dev
+
+      - name: Run make check
+        run: PYTHON=.venv/bin/python make check
+
+      - name: Run check script
+        run: PYTHON=.venv/bin/python scripts/check.sh
