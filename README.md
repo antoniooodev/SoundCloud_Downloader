@@ -94,6 +94,10 @@ soundcloud-downloader doctor
 soundcloud-downloader download track "https://soundcloud.com/example/track" --format m4a
 ```
 
+## Smoke testing
+
+See [docs/SMOKE_TEST.md](docs/SMOKE_TEST.md) for a local MVP smoke-test flow.
+
 ## OAuth setup
 
 The OAuth helper commands are the supported way to bootstrap and maintain
