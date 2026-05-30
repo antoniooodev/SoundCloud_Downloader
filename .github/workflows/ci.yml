@@ -9,6 +9,10 @@ on:
 jobs:
   quality:
     runs-on: ubuntu-latest
+    env:
+      NO_COLOR: "1"
+      TERM: dumb
+      COLUMNS: "160"
 
     steps:
       - uses: actions/checkout@v4

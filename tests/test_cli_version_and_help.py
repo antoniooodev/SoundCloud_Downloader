@@ -1,5 +1,6 @@
 from collections.abc import Iterator
 from pathlib import Path
+import re
 
 import pytest
 from typer.testing import CliRunner
@@ -16,6 +17,12 @@ CLIENT_SECRET_REAL_VALUE_PATTERNS = (
     "client_secret:",
     "client-secret=",
 )
+ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
+DETERMINISTIC_CLI_ENV = {
+    "NO_COLOR": "1",
+    "TERM": "dumb",
+    "COLUMNS": "160",
+}
 
 
 @pytest.fixture()
@@ -40,7 +47,7 @@ def no_file_writes(tmp_path: Path) -> Iterator[None]:
 
 
 def invoke(runner: CliRunner, *args: str) -> str:
-    result = runner.invoke(app, list(args))
+    result = runner.invoke(app, list(args), color=False, env=DETERMINISTIC_CLI_ENV)
     assert result.exit_code == 0, result.output
     return result.output
 
@@ -54,7 +61,14 @@ def assert_no_secret_terms(output: str) -> None:
 
 
 def command_exists(help_output: str, command_name: str) -> bool:
-    return command_name in help_output.split()
+    return command_name in normalize_help_output(help_output)
+
+
+def normalize_help_output(output: str) -> str:
+    output = ANSI_RE.sub("", output)
+    for character in ("│", "╭", "╮", "╰", "╯"):
+        output = output.replace(character, " ")
+    return " ".join(output.split())
 
 
 def test_root_help_exits_zero_and_lists_core_commands(runner: CliRunner) -> None:
