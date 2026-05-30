@@ -162,11 +162,13 @@ class MockSoundCloudTransport:
         resolve_payload: dict[str, object] | None = None,
         resolve_status: int = 200,
         resolve_text: str | None = None,
+        redirect_location: str | None = None,
         refresh_payload: dict[str, object] | None = None,
     ) -> None:
         self.resolve_payload = resolve_payload if resolve_payload is not None else official_track_payload()
         self.resolve_status = resolve_status
         self.resolve_text = resolve_text
+        self.redirect_location = redirect_location
         self.refresh_payload = refresh_payload if refresh_payload is not None else {
             "access_token": REFRESHED_ACCESS,
             "refresh_token": REFRESHED_REFRESH,
@@ -175,17 +177,31 @@ class MockSoundCloudTransport:
         self.resolve_calls = 0
         self.refresh_calls = 0
         self.resolve_authorizations: list[str | None] = []
+        self.resource_calls = 0
+        self.resource_authorizations: list[str | None] = []
+        self.request_urls: list[str] = []
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
+        self.request_urls.append(str(request.url))
         if request.url.path == "/oauth/token":
             self.refresh_calls += 1
             return httpx.Response(200, json=self.refresh_payload, request=request)
         if request.url.path == "/resolve":
             self.resolve_calls += 1
             self.resolve_authorizations.append(request.headers.get("authorization"))
+            if self.redirect_location is not None:
+                return httpx.Response(
+                    self.resolve_status,
+                    headers={"Location": self.redirect_location},
+                    request=request,
+                )
             if self.resolve_text is not None:
                 return httpx.Response(self.resolve_status, text=self.resolve_text, request=request)
             return httpx.Response(self.resolve_status, json=self.resolve_payload, request=request)
+        if request.url.path == "/tracks/123":
+            self.resource_calls += 1
+            self.resource_authorizations.append(request.headers.get("authorization"))
+            return httpx.Response(200, json=self.resolve_payload, request=request)
         return httpx.Response(599, request=request)
 
 
@@ -468,6 +484,125 @@ def test_official_mode_uses_stored_access_token_without_refresh(
     assert exit_code == 0, output
     assert transport.refresh_calls == 0
     assert transport.resolve_authorizations == [f"OAuth {RAW_ACCESS}"]
+
+
+def test_official_mode_follows_safe_absolute_resolve_redirect(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    env_file, _token_store_path, _key = prepared_env(tmp_path)
+    transport = MockSoundCloudTransport(
+        resolve_status=302,
+        redirect_location="https://api.soundcloud.test/tracks/123",
+    )
+    patch_http_client(monkeypatch, transport)
+
+    exit_code, output = invoke_resolver(
+        "https://soundcloud.com/user/track",
+        "--official",
+        "--env-file",
+        str(env_file),
+    )
+    result = parse_output(output)
+
+    assert exit_code == 0, output
+    assert result["resolved"] is True
+    assert transport.resolve_calls == 1
+    assert transport.resource_calls == 1
+
+
+def test_official_mode_follows_safe_relative_resolve_redirect(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    env_file, _token_store_path, _key = prepared_env(tmp_path)
+    transport = MockSoundCloudTransport(resolve_status=302, redirect_location="/tracks/123")
+    patch_http_client(monkeypatch, transport)
+
+    exit_code, output = invoke_resolver(
+        "https://soundcloud.com/user/track",
+        "--official",
+        "--env-file",
+        str(env_file),
+    )
+
+    assert exit_code == 0, output
+    assert transport.resource_calls == 1
+
+
+def test_official_mode_preserves_authorization_for_safe_soundcloud_api_redirect(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    env_file, _token_store_path, _key = prepared_env(tmp_path)
+    transport = MockSoundCloudTransport(resolve_status=302, redirect_location="/tracks/123")
+    patch_http_client(monkeypatch, transport)
+
+    exit_code, output = invoke_resolver(
+        "https://soundcloud.com/user/track",
+        "--official",
+        "--env-file",
+        str(env_file),
+    )
+
+    assert exit_code == 0, output
+    assert transport.resolve_authorizations == [f"OAuth {RAW_ACCESS}"]
+    assert transport.resource_authorizations == [f"OAuth {RAW_ACCESS}"]
+
+
+@pytest.mark.parametrize(
+    "redirect_location",
+    [
+        "https://evil.example.test/tracks/123",
+        "https://user:pass@api.soundcloud.test/tracks/123",
+        "https://api.soundcloud.test/tracks/123?access_token=secret",
+        "https://api.soundcloud.test/tracks/123?client_secret=secret",
+    ],
+)
+def test_official_mode_rejects_unsafe_resolve_redirects_without_leaking_urls(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    redirect_location: str,
+) -> None:
+    source_url = "https://soundcloud.com/user/private-track"
+    env_file, _token_store_path, _key = prepared_env(tmp_path)
+    transport = MockSoundCloudTransport(resolve_status=302, redirect_location=redirect_location)
+    patch_http_client(monkeypatch, transport)
+
+    exit_code, output = invoke_resolver(
+        source_url,
+        "--official",
+        "--env-file",
+        str(env_file),
+    )
+
+    assert exit_code != 0
+    assert "Official resolver request failed." in output
+    assert source_url not in output
+    assert redirect_location not in output
+    assert RAW_ACCESS not in output
+    assert CLIENT_SECRET not in output
+    assert transport.resource_calls == 0
+
+
+def test_official_mode_stops_redirect_loop_at_max_redirects(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    env_file, _token_store_path, _key = prepared_env(tmp_path)
+    transport = MockSoundCloudTransport(resolve_status=302, redirect_location="/resolve")
+    patch_http_client(monkeypatch, transport)
+
+    exit_code, output = invoke_resolver(
+        "https://soundcloud.com/user/track",
+        "--official",
+        "--env-file",
+        str(env_file),
+    )
+
+    assert exit_code != 0
+    assert "Official resolver request failed." in output
+    assert transport.resolve_calls == 4
 
 
 def test_official_mode_refreshes_expired_token_and_persists_replacement(

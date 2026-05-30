@@ -339,6 +339,23 @@ def test_no_retry_happens_for_404(monkeypatch: pytest.MonkeyPatch) -> None:
     run(client.aclose())
 
 
+def test_redirects_are_not_followed_by_default() -> None:
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(302, headers={"Location": "/next"}, request=request)
+
+    client = SafeAsyncHttpClient(network_settings(), transport=httpx.MockTransport(handler))
+
+    response = run(client.request(HttpRequest(method=HttpMethod.GET, url="https://example.test/")))
+
+    assert attempts == 1
+    assert response.status_code == 302
+    run(client.aclose())
+
+
 @pytest.mark.parametrize(
     "exception_factory",
     [

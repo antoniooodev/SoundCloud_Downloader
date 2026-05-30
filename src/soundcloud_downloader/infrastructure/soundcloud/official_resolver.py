@@ -11,6 +11,7 @@ from soundcloud_downloader.application.ports import (
 from soundcloud_downloader.config import AppSettings
 from soundcloud_downloader.domain import NormalizedResolverInput, SoundCloudResourceType
 from soundcloud_downloader.infrastructure.http import (
+    HttpRequestError,
     HttpMethod,
     HttpRequest,
     SafeAsyncHttpClient,
@@ -86,14 +87,24 @@ class OfficialSoundCloudResolver(SoundCloudResolverPort):
 
         token = await self._token_provider.get_access_token()
         api_request = self._request_builder.build(normalized, token)
-        response = await self._http_client.request(
-            HttpRequest(
-                method=api_request.method,
-                url=api_request.url,
-                headers=api_request.headers,
-                params=api_request.params,
+        try:
+            response = await self._http_client.request(
+                HttpRequest(
+                    method=api_request.method,
+                    url=api_request.url,
+                    headers=api_request.headers,
+                    params=api_request.params,
+                    follow_redirects=True,
+                    max_redirects=3,
+                )
             )
-        )
+        except HttpRequestError:
+            return self._resource(
+                SoundCloudResolveStatus.ERROR,
+                SoundCloudResourceKind.UNKNOWN,
+                normalized,
+                "Unable to resolve SoundCloud URL.",
+            )
 
         if response.status_code == 404:
             return self._resource(

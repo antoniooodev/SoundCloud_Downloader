@@ -23,6 +23,8 @@ class HttpRequest(BaseModel):
     json_body: Mapping[str, object] | None = None
     form_data: Mapping[str, str] | None = None
     timeout_seconds: float | None = Field(default=None, gt=0)
+    follow_redirects: bool = False
+    max_redirects: int = Field(default=3, ge=0, le=10)
 
     @field_validator("form_data", mode="before")
     @classmethod

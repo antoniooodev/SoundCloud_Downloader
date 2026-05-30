@@ -2,12 +2,13 @@ import asyncio
 import logging
 from collections.abc import Mapping
 from types import TracebackType
+from urllib.parse import parse_qsl, urljoin, urlparse
 
 import httpx
 
 from soundcloud_downloader.config import AppSettings
 from soundcloud_downloader.domain import ErrorCode, SoundcloudDownloaderError
-from soundcloud_downloader.infrastructure.http.models import HttpRequest, HttpResponse
+from soundcloud_downloader.infrastructure.http.models import HttpMethod, HttpRequest, HttpResponse
 from soundcloud_downloader.infrastructure.observability import (
     get_logger,
     redact_mapping,
@@ -15,7 +16,11 @@ from soundcloud_downloader.infrastructure.observability import (
 )
 
 _RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
+_REDIRECT_STATUS_CODES = frozenset({301, 302, 303, 307, 308})
 _SENSITIVE_FORM_FIELD_NAMES = frozenset({"code", "code_verifier", "client_secret"})
+_SENSITIVE_REDIRECT_QUERY_KEYS = frozenset(
+    {"access_token", "refresh_token", "client_secret", "authorization", "cookie", "set-cookie"}
+)
 _REDACTED_FORM_VALUE = "[REDACTED]"
 
 
@@ -65,18 +70,25 @@ class SafeAsyncHttpClient:
         timeout_seconds = request.timeout_seconds or self._settings.http_timeout_seconds
         max_attempts = 1 + self._settings.http_max_retries
         url_redacted = redact_url(request.url)
+        redirect_count = 0
+        current_method = request.method.value
+        current_url = request.url
+        current_headers = dict(request.headers)
+        current_params = dict(request.params) if request.params else None
+        current_json = dict(request.json_body) if request.json_body is not None else None
+        current_data = dict(request.form_data) if request.form_data is not None else None
         attempt = 1
 
         while True:
             self._log_request_started(request, url_redacted, attempt)
             try:
                 response = await self._client.request(
-                    request.method.value,
-                    request.url,
-                    headers=dict(request.headers),
-                    params=dict(request.params) if request.params else None,
-                    json=dict(request.json_body) if request.json_body is not None else None,
-                    data=dict(request.form_data) if request.form_data is not None else None,
+                    current_method,
+                    current_url,
+                    headers=current_headers,
+                    params=current_params,
+                    json=current_json,
+                    data=current_data,
                     timeout=timeout_seconds,
                 )
             except (httpx.TimeoutException, httpx.NetworkError) as exc:
@@ -94,6 +106,23 @@ class SafeAsyncHttpClient:
                     ) from exc
                 await self._schedule_retry(request, url_redacted, attempt, type(exc).__name__)
                 attempt += 1
+                continue
+
+            if request.follow_redirects and response.status_code in _REDIRECT_STATUS_CODES:
+                if redirect_count >= request.max_redirects:
+                    raise HttpRequestError(
+                        ErrorCode.NETWORK_PERMANENT,
+                        "HTTP redirect limit exceeded.",
+                        status_code=response.status_code,
+                    )
+                location = response.headers.get("location")
+                current_url = _safe_redirect_url(current_url, location)
+                redirect_count += 1
+                current_params = None
+                if response.status_code == 303:
+                    current_method = HttpMethod.GET.value
+                    current_json = None
+                    current_data = None
                 continue
 
             if response.status_code in _RETRYABLE_STATUS_CODES and attempt < max_attempts:
@@ -186,3 +215,36 @@ class SafeAsyncHttpClient:
             status_code=status_code,
         )
         await asyncio.sleep(delay)
+
+
+def _safe_redirect_url(current_url: str, location: str | None) -> str:
+    if location is None or location == "":
+        raise HttpRequestError(
+            ErrorCode.NETWORK_PERMANENT,
+            "Unsafe HTTP redirect was rejected.",
+        )
+    target = urljoin(current_url, location)
+    current = urlparse(current_url)
+    parsed = urlparse(target)
+    if parsed.scheme not in {"http", "https"} or parsed.netloc == "":
+        raise HttpRequestError(
+            ErrorCode.NETWORK_PERMANENT,
+            "Unsafe HTTP redirect was rejected.",
+        )
+    if parsed.username is not None or parsed.password is not None:
+        raise HttpRequestError(
+            ErrorCode.NETWORK_PERMANENT,
+            "Unsafe HTTP redirect was rejected.",
+        )
+    if parsed.hostname != current.hostname:
+        raise HttpRequestError(
+            ErrorCode.NETWORK_PERMANENT,
+            "Unsafe HTTP redirect was rejected.",
+        )
+    query_keys = {key.strip().lower() for key, _value in parse_qsl(parsed.query, keep_blank_values=True)}
+    if query_keys & _SENSITIVE_REDIRECT_QUERY_KEYS:
+        raise HttpRequestError(
+            ErrorCode.NETWORK_PERMANENT,
+            "Unsafe HTTP redirect was rejected.",
+        )
+    return target

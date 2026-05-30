@@ -149,6 +149,7 @@ class E2EHttpTransport:
         segments: dict[str, bytes] | None = None,
         refresh_payload: dict[str, object] | None = None,
         resolve_payload: dict[str, object] | None = None,
+        resolve_redirect_location: str | None = None,
         stream_url: str = STREAM_URL,
         segment_failure_index: int | None = None,
     ) -> None:
@@ -159,6 +160,7 @@ class E2EHttpTransport:
         self.resolve_payload = (
             resolve_payload if resolve_payload is not None else official_track_payload()
         )
+        self.resolve_redirect_location = resolve_redirect_location
         self.refresh_payload = refresh_payload if refresh_payload is not None else {
             "access_token": REFRESHED_ACCESS,
             "refresh_token": REFRESHED_REFRESH,
@@ -182,6 +184,14 @@ class E2EHttpTransport:
         if path == "/resolve":
             self.resolve_calls += 1
             self.resolve_authorizations.append(request.headers.get("authorization"))
+            if self.resolve_redirect_location is not None:
+                return httpx.Response(
+                    302,
+                    headers={"Location": self.resolve_redirect_location},
+                    request=request,
+                )
+            return httpx.Response(200, json=self.resolve_payload, request=request)
+        if path == "/tracks/123":
             return httpx.Response(200, json=self.resolve_payload, request=request)
         full_url = str(request.url)
         if full_url == TRANSCODING_URL:
@@ -417,6 +427,27 @@ def test_e2e_pipeline_uses_resolver_endpoint(
 
     assert exit_code == 0
     assert transport.resolve_calls == 1
+
+
+def test_e2e_pipeline_downloads_after_safe_resolver_redirect(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    block_real_network(monkeypatch)
+    block_real_subprocess(monkeypatch)
+    env_file, _store, _key = prepared_env(tmp_path)
+    transport = E2EHttpTransport(resolve_redirect_location="/tracks/123")
+    install_test_doubles(monkeypatch, transport)
+
+    exit_code, output = invoke(*_common_args(env_file))
+    payload = json.loads(output)
+
+    assert exit_code == 0, output
+    assert payload["status"] == "succeeded"
+    assert transport.resolve_calls == 1
+    assert transport.transcoding_calls == 1
+    assert transport.manifest_calls == 1
+    assert transport.segment_calls == list(SEGMENT_URLS)
 
 
 def test_e2e_pipeline_uses_transcoding_endpoint(
