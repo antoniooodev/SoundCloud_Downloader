@@ -26,6 +26,12 @@ from soundcloud_downloader.domain.audio_export import (
     AudioExportStatus,
     redact_audio_export_result,
 )
+from soundcloud_downloader.domain.download import (
+    TrackDownloadRequest,
+    TrackDownloadResult,
+    TrackDownloadStatus,
+    redact_track_download_result,
+)
 from soundcloud_downloader.domain.hls_segments import (
     HLSByteRange,
     HLSInitializationMapReference,
@@ -208,10 +214,14 @@ __all__ = [
     "SourceProtocol",
     "StoredOAuthTokenSet",
     "TrackAccessContext",
+    "TrackDownloadRequest",
+    "TrackDownloadResult",
+    "TrackDownloadStatus",
     "redact_hls_segment_plan",
     "redact_hls_staging_result",
     "redact_hls_media_assembly_result",
     "redact_audio_export_result",
+    "redact_track_download_result",
     "redact_remux_result",
     "StagedHLSSegment",
 ]

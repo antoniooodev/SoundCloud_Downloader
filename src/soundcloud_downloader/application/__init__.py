@@ -70,6 +70,16 @@ from soundcloud_downloader.application.transcoding_endpoint import (
     SoundCloudTranscodingEndpointRequestBuilder,
     redact_transcoding_endpoint_request,
 )
+from soundcloud_downloader.application.track_download_workflow import (
+    AudioExporterPort,
+    HLSMediaAssemblerPort,
+    HLSSegmentFetcherPort,
+    M4ARemuxerPort,
+    TrackDownloadWorkflow,
+    TrackDownloadWorkflowError,
+    TranscodingEndpointResolverPort,
+    select_transcoding,
+)
 
 __all__ = [
     "HLSManifestAnalyzer",
@@ -78,11 +88,15 @@ __all__ = [
     "HLSSegmentPlanningError",
     "HLSSegmentPlanningRequest",
     "ArtifactStoragePort",
+    "AudioExporterPort",
     "FFMPEGCommand",
     "FFMPEGResult",
     "FFMPEGRunnerPort",
+    "HLSMediaAssemblerPort",
     "CreateOAuthAuthorizationSessionRequest",
+    "HLSSegmentFetcherPort",
     "InMemoryOAuthAuthorizationSessionStore",
+    "M4ARemuxerPort",
     "OAuthAuthorizationSessionService",
     "OAuthAuthorizationSessionStore",
     "OAuthAuthorizationCodeExchangeWorkflow",
@@ -112,8 +126,12 @@ __all__ = [
     "StreamAnalysisResult",
     "StreamAnalysisService",
     "TemporaryWorkspacePort",
+    "TrackDownloadWorkflow",
+    "TrackDownloadWorkflowError",
+    "TranscodingEndpointResolverPort",
     "redact_ffmpeg_command",
     "redact_refresh_token_request",
     "redact_token_exchange_request",
     "redact_transcoding_endpoint_request",
+    "select_transcoding",
 ]

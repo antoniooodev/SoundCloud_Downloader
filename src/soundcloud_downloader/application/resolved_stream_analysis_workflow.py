@@ -1,6 +1,6 @@
 from typing import Protocol, runtime_checkable
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_serializer
 
 from soundcloud_downloader.application.reconstruction_planner import (
     ReconstructionPlan,
@@ -31,8 +31,7 @@ class HLSManifestFetcherPort(Protocol):
         self,
         *,
         stream: SoundCloudResolvedStream,
-    ) -> str:
-        ...
+    ) -> str: ...
 
 
 class ResolvedStreamAnalysisRequest(BaseModel):
@@ -49,6 +48,11 @@ class ResolvedStreamAnalysisResult(BaseModel):
     stream: SoundCloudResolvedStream
     manifest_analysis: HLSManifestAnalysis | None = None
     plan: ReconstructionPlan
+    manifest_text: SecretStr | None = Field(default=None, repr=False)
+
+    @field_serializer("manifest_text", when_used="always")
+    def serialize_manifest_text(self, value: SecretStr | None) -> str | None:
+        return None if value is None else str(value)
 
 
 class ResolvedStreamAnalysisWorkflow:
@@ -91,6 +95,7 @@ class ResolvedStreamAnalysisWorkflow:
             stream=request.stream,
             manifest_analysis=plan.hls_analysis,
             plan=plan,
+            manifest_text=None if manifest_text is None else SecretStr(manifest_text),
         )
 
 
