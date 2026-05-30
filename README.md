@@ -86,6 +86,14 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 
 Never commit real tokens, real client secrets, or real Fernet keys.
 
+## Command reference
+
+```bash
+soundcloud-downloader --version
+soundcloud-downloader doctor
+soundcloud-downloader download track "https://soundcloud.com/example/track" --format m4a
+```
+
 ## OAuth setup
 
 The OAuth helper commands are the supported way to bootstrap and maintain

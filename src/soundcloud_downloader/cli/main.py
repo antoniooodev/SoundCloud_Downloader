@@ -1,12 +1,35 @@
+from importlib.metadata import PackageNotFoundError, version
+from typing import Annotated
+
 import typer
 
-from soundcloud_downloader import __version__
 from soundcloud_downloader.cli.doctor import doctor
 from soundcloud_downloader.cli.download import download_app
 from soundcloud_downloader.cli.oauth import oauth_app
 from soundcloud_downloader.cli.policy import policy_app
 from soundcloud_downloader.cli.reconstruction import plan_app
 from soundcloud_downloader.cli.resolver import resolver_app
+
+PACKAGE_NAME = "soundcloud-downloader"
+UNKNOWN_VERSION = "0.0.0+unknown"
+
+
+def get_package_version() -> str:
+    try:
+        return version(PACKAGE_NAME)
+    except PackageNotFoundError:
+        return UNKNOWN_VERSION
+
+
+def format_version() -> str:
+    return f"{PACKAGE_NAME} {get_package_version()}"
+
+
+def version_callback(value: bool) -> None:
+    if value:
+        typer.echo(format_version())
+        raise typer.Exit()
+
 
 app = typer.Typer(
     help="SoundCloud Downloader command line interface.",
@@ -21,11 +44,21 @@ app.command("doctor", help="Inspect local configuration before running downloads
 
 
 @app.callback()
-def main() -> None:
+def main(
+    version_option: Annotated[
+        bool,
+        typer.Option(
+            "--version",
+            callback=version_callback,
+            help="Print the package version and exit.",
+            is_eager=True,
+        ),
+    ] = False,
+) -> None:
     """SoundCloud Downloader command line interface."""
 
 
-@app.command()
-def version() -> None:
+@app.command("version")
+def version_command() -> None:
     """Print the package version."""
-    typer.echo(__version__)
+    typer.echo(format_version())
