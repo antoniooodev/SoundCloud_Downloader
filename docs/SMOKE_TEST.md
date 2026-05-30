@@ -76,7 +76,8 @@ soundcloud-downloader doctor --env-file .env
 
 Resolve reported errors before continuing. The doctor command may check whether
 the configured `ffmpeg` binary is discoverable; it does not execute media
-conversion.
+conversion. It also reports `download_ready` and a safe `missing_required` list
+for track download prerequisites.
 
 ## 6. Create OAuth session
 
@@ -141,6 +142,9 @@ should be under `SCD_ARTIFACT_STORAGE_ROOT`.
 ```bash
 soundcloud-downloader doctor --env-file .env
 ```
+
+Confirm `download_ready` is `true` or review `missing_required` for any
+remaining symbolic prerequisites.
 
 ## 11. Logout
 

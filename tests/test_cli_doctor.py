@@ -14,6 +14,15 @@ from soundcloud_downloader.cli.main import app
 
 CLIENT_ID = "raw-client-id-should-not-leak"
 CLIENT_SECRET = "raw-client-secret-should-not-leak"
+SAFE_MISSING_REQUIRED_NAMES = {
+    "allow_network",
+    "allow_filesystem_writes",
+    "soundcloud_client_id",
+    "soundcloud_client_secret",
+    "oauth_token_encryption_key",
+    "oauth_session_encryption_key",
+    "ffmpeg",
+}
 
 
 def write_env_file(
@@ -94,6 +103,8 @@ def test_doctor_returns_json_by_default(
 
     assert exit_code == 0, output
     assert payload["status"] == "ok"
+    assert payload["download_ready"] is True
+    assert payload["missing_required"] == []
 
 
 def test_doctor_supports_plain_output(
@@ -106,6 +117,8 @@ def test_doctor_supports_plain_output(
 
     assert exit_code == 0, output
     assert "status=ok" in output
+    assert "download_ready=true" in output
+    assert "missing_required=" in output
     assert "allow_network=true" in output
 
 
@@ -120,6 +133,8 @@ def test_doctor_reports_status_ok_when_required_settings_present(
 
     assert exit_code == 0
     assert payload["status"] == "ok"
+    assert payload["download_ready"] is True
+    assert payload["missing_required"] == []
     assert payload["errors"] == []
 
 
@@ -132,7 +147,7 @@ def test_doctor_reports_status_ok_when_required_settings_present(
         ("oauth_session_encryption_key", {"session_key": None}),
     ],
 )
-def test_doctor_reports_error_when_required_value_is_missing(
+def test_doctor_reports_warning_when_download_requirement_is_missing(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     missing: str,
@@ -144,9 +159,25 @@ def test_doctor_reports_error_when_required_value_is_missing(
     exit_code, output = invoke_doctor("--env-file", str(env_file))
     payload = json.loads(output)
 
-    assert exit_code != 0
-    assert payload["status"] == "error"
-    assert any(missing in error for error in payload["errors"])
+    assert exit_code == 0
+    assert payload["status"] == "warning"
+    assert payload["download_ready"] is False
+    assert missing in payload["missing_required"]
+    assert payload["errors"] == []
+
+
+def test_doctor_json_output_includes_download_ready_and_missing_required(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    patch_ffmpeg_found(monkeypatch, True)
+    env_file = base_env_file(tmp_path)
+
+    exit_code, output = invoke_doctor("--env-file", str(env_file))
+    payload = json.loads(output)
+
+    assert exit_code == 0
+    assert "download_ready" in payload
+    assert "missing_required" in payload
 
 
 def test_doctor_reports_allow_network_value(
@@ -184,6 +215,8 @@ def test_doctor_warns_when_allow_network_is_false(
 
     assert exit_code == 0
     assert payload["status"] == "warning"
+    assert payload["download_ready"] is False
+    assert "allow_network" in payload["missing_required"]
     assert any("allow_network" in warning for warning in payload["warnings"])
 
 
@@ -198,6 +231,8 @@ def test_doctor_warns_when_allow_filesystem_writes_is_false(
 
     assert exit_code == 0
     assert payload["status"] == "warning"
+    assert payload["download_ready"] is False
+    assert "allow_filesystem_writes" in payload["missing_required"]
     assert any("allow_filesystem_writes" in warning for warning in payload["warnings"])
 
 
@@ -262,7 +297,9 @@ def test_doctor_reports_ffmpeg_found_false_when_shutil_which_returns_none(
 
     assert exit_code == 0
     assert payload["status"] == "warning"
+    assert payload["download_ready"] is False
     assert payload["checks"]["ffmpeg_found"] is False
+    assert "ffmpeg" in payload["missing_required"]
 
 
 def test_doctor_no_check_ffmpeg_skips_shutil_which(
@@ -282,8 +319,40 @@ def test_doctor_no_check_ffmpeg_skips_shutil_which(
     payload = json.loads(output)
 
     assert exit_code == 0
+    assert payload["download_ready"] is True
+    assert payload["missing_required"] == []
     assert calls["count"] == 0
     assert "ffmpeg_found" not in payload["checks"]
+
+
+def test_missing_required_contains_only_symbolic_names(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    patch_ffmpeg_found(monkeypatch, False)
+    token_key = Fernet.generate_key().decode()
+    session_key = Fernet.generate_key().decode()
+    env_file = write_env_file(
+        tmp_path,
+        token_key=token_key,
+        session_key=session_key,
+        client_id=CLIENT_ID,
+        client_secret=CLIENT_SECRET,
+        allow_network=False,
+        allow_filesystem_writes=False,
+    )
+
+    _exit_code, output = invoke_doctor("--env-file", str(env_file))
+    payload = json.loads(output)
+
+    assert set(payload["missing_required"]) <= SAFE_MISSING_REQUIRED_NAMES
+    assert CLIENT_ID not in payload["missing_required"]
+    assert CLIENT_SECRET not in payload["missing_required"]
+    assert token_key not in payload["missing_required"]
+    assert session_key not in payload["missing_required"]
+    assert CLIENT_ID not in output
+    assert CLIENT_SECRET not in output
+    assert token_key not in output
+    assert session_key not in output
 
 
 def test_doctor_does_not_create_artifact_directories(
@@ -362,7 +431,7 @@ def test_doctor_plain_output_does_not_contain_token_encryption_key(
     assert session_key not in output
 
 
-def test_doctor_error_output_is_safe(
+def test_doctor_warning_output_is_safe_when_requirement_is_missing(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     patch_ffmpeg_found(monkeypatch, True)
@@ -376,10 +445,35 @@ def test_doctor_error_output_is_safe(
     exit_code, output = invoke_doctor("--env-file", str(env_file))
     payload = json.loads(output)
 
-    assert exit_code != 0
-    assert payload["status"] == "error"
+    assert exit_code == 0
+    assert payload["status"] == "warning"
+    assert payload["download_ready"] is False
     assert token_key not in output
     assert CLIENT_SECRET not in output
+
+
+def test_doctor_settings_error_output_is_safe(tmp_path: Path) -> None:
+    env_file = tmp_path / "settings.env"
+    secret_value = "invalid-secret-value-should-not-leak"
+    env_file.write_text(
+        "\n".join(
+            [
+                f"SCD_SOUNDCLOUD_CLIENT_SECRET={CLIENT_SECRET}",
+                f"SCD_OAUTH_TOKEN_ENCRYPTION_KEY={secret_value}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code, output = invoke_doctor("--env-file", str(env_file))
+    payload = json.loads(output)
+
+    assert exit_code != 0
+    assert payload["status"] == "error"
+    assert payload["download_ready"] is False
+    assert payload["errors"] == ["settings could not be loaded."]
+    assert CLIENT_SECRET not in output
+    assert secret_value not in output
 
 
 def test_no_real_network_calls_occur(

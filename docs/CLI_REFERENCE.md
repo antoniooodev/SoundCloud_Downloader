@@ -30,6 +30,10 @@ Common options:
 - `--check-ffmpeg` / `--no-check-ffmpeg`
 - `--check-paths` / `--no-check-paths`
 
+Doctor output includes `download_ready`, a safe boolean for track download
+readiness, and `missing_required`, a list of symbolic missing prerequisites
+such as `allow_network`, `soundcloud_client_id`, or `ffmpeg`.
+
 ## OAuth
 
 OAuth commands manage PKCE authorization sessions and encrypted local token
