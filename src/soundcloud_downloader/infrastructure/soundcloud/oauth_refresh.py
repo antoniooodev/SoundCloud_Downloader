@@ -1,5 +1,6 @@
 import json
 from collections.abc import Mapping
+from typing import Any
 
 from pydantic import SecretStr, ValidationError
 
@@ -19,6 +20,13 @@ from soundcloud_downloader.infrastructure.http import HttpMethod, HttpRequest, S
 
 class OAuthRefreshTokenError(SoundcloudDownloaderError):
     pass
+
+
+class OAuthRefreshTokenResponseInvalidError(OAuthRefreshTokenError):
+    pass
+
+
+_ACCEPTED_RESPONSE_TOKEN_TYPES = {"OAuth", "Bearer", "bearer"}
 
 
 class OAuthRefreshTokenService:
@@ -85,40 +93,109 @@ class OAuthRefreshTokenService:
         try:
             payload = json.loads(response_text)
         except json.JSONDecodeError as exc:
-            raise OAuthRefreshTokenError(
+            raise OAuthRefreshTokenResponseInvalidError(
                 ErrorCode.NETWORK_PERMANENT,
                 "OAuth token refresh returned invalid JSON.",
             ) from exc
 
         if not isinstance(payload, Mapping):
-            raise OAuthRefreshTokenError(
+            raise OAuthRefreshTokenResponseInvalidError(
                 ErrorCode.UNKNOWN_UNSAFE,
                 "OAuth token refresh returned an invalid response payload.",
             )
 
-        access_token = payload.get("access_token")
-        if not isinstance(access_token, str) or access_token == "":
-            raise OAuthRefreshTokenError(
-                ErrorCode.UNKNOWN_UNSAFE,
-                "OAuth token refresh response did not include a valid access token.",
-            )
+        invalid_fields: list[str] = []
+        access_token = _required_secret_string(payload, "access_token", invalid_fields)
+        refresh_token = _optional_secret_string(payload, "refresh_token", invalid_fields)
+        token_type = _token_type(payload, invalid_fields)
+        expires_in = _expires_in(payload, invalid_fields)
+        scope = _scope(payload, invalid_fields)
+        if invalid_fields:
+            raise _token_response_validation_error(invalid_fields)
 
-        refresh_token = payload.get("refresh_token")
-        expires_in = payload.get("expires_in")
-        scope = payload.get("scope")
         try:
             return OAuthTokenResponse(
-                access_token=OAuthAccessToken(value=SecretStr(access_token)),
+                access_token=OAuthAccessToken(value=SecretStr(access_token), token_type=token_type),
                 refresh_token=(
                     OAuthRefreshToken(value=SecretStr(refresh_token))
-                    if isinstance(refresh_token, str) and refresh_token != ""
+                    if refresh_token is not None
                     else None
                 ),
-                expires_in=expires_in if isinstance(expires_in, int) else None,
-                scope=scope if isinstance(scope, str) else None,
+                expires_in=expires_in,
+                scope=scope,
             )
         except ValidationError as exc:
-            raise OAuthRefreshTokenError(
-                ErrorCode.UNKNOWN_UNSAFE,
-                "OAuth token refresh response failed safe validation.",
-            ) from exc
+            raise _token_response_validation_error(_invalid_fields_from_validation_error(exc)) from exc
+
+
+def _required_secret_string(
+    payload: Mapping[str, Any],
+    field_name: str,
+    invalid_fields: list[str],
+) -> str:
+    value = payload.get(field_name)
+    if not isinstance(value, str) or value == "":
+        invalid_fields.append(field_name)
+        return ""
+    return value
+
+
+def _optional_secret_string(
+    payload: Mapping[str, Any],
+    field_name: str,
+    invalid_fields: list[str],
+) -> str | None:
+    if field_name not in payload or payload[field_name] is None or payload[field_name] == "":
+        return None
+    value = payload[field_name]
+    if not isinstance(value, str):
+        invalid_fields.append(field_name)
+        return None
+    return value
+
+
+def _token_type(payload: Mapping[str, Any], invalid_fields: list[str]) -> str:
+    if "token_type" not in payload or payload["token_type"] is None:
+        return "OAuth"
+    value = payload["token_type"]
+    if isinstance(value, str) and value in _ACCEPTED_RESPONSE_TOKEN_TYPES:
+        return value
+    invalid_fields.append("token_type")
+    return "OAuth"
+
+
+def _expires_in(payload: Mapping[str, Any], invalid_fields: list[str]) -> int | None:
+    if "expires_in" not in payload or payload["expires_in"] is None:
+        return None
+    value = payload["expires_in"]
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        invalid_fields.append("expires_in")
+        return None
+    return int(value)
+
+
+def _scope(payload: Mapping[str, Any], invalid_fields: list[str]) -> str | None:
+    if "scope" not in payload or payload["scope"] is None or payload["scope"] == "":
+        return None
+    value = payload["scope"]
+    if not isinstance(value, str):
+        invalid_fields.append("scope")
+        return None
+    return value
+
+
+def _invalid_fields_from_validation_error(exc: ValidationError) -> list[str]:
+    invalid_fields: list[str] = []
+    for error in exc.errors(include_url=False, include_context=False, include_input=False):
+        location = error.get("loc", ())
+        if isinstance(location, tuple) and location:
+            invalid_fields.append(str(location[0]))
+    return invalid_fields or ["response"]
+
+
+def _token_response_validation_error(invalid_fields: list[str]) -> OAuthRefreshTokenError:
+    safe_fields = sorted(set(invalid_fields))
+    return OAuthRefreshTokenResponseInvalidError(
+        ErrorCode.UNKNOWN_UNSAFE,
+        f"OAuth token refresh response validation failed. invalid_fields={json.dumps(safe_fields)}",
+    )

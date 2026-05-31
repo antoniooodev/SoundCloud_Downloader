@@ -188,6 +188,8 @@ class E2EHttpTransport:
         manifest_body: str | None = None,
         segments: dict[str, bytes] | None = None,
         refresh_payload: dict[str, object] | None = None,
+        refresh_status: int = 200,
+        refresh_text: str | None = None,
         resolve_payload: dict[str, object] | None = None,
         resolve_redirect_location: str | None = None,
         stream_url: str = STREAM_URL,
@@ -208,6 +210,8 @@ class E2EHttpTransport:
             "refresh_token": REFRESHED_REFRESH,
             "expires_in": 3600,
         }
+        self.refresh_status = refresh_status
+        self.refresh_text = refresh_text
         self.stream_url = stream_url
         self.streams_payload = (
             streams_payload if streams_payload is not None else {"hls_aac_160_url": stream_url}
@@ -228,6 +232,8 @@ class E2EHttpTransport:
         path = request.url.path
         if path == "/oauth/token":
             self.refresh_calls += 1
+            if self.refresh_text is not None:
+                return httpx.Response(self.refresh_status, text=self.refresh_text, request=request)
             return httpx.Response(200, json=self.refresh_payload, request=request)
         if path == "/resolve":
             self.resolve_calls += 1
@@ -371,6 +377,18 @@ def setup_token_store(
             expires_at=expires_at,
         )
     )
+
+
+def _load_token_set(store_path: Path, key: str) -> StoredOAuthTokenSet:
+    token_set = EncryptedOAuthTokenStore(
+        AppSettings(
+            allow_filesystem_writes=False,
+            oauth_token_store_path=store_path,
+            oauth_token_encryption_key=SecretStr(key),
+        )
+    ).get(OAuthTokenProfileId(value="default"))
+    assert token_set is not None
+    return token_set
 
 
 def prepared_env(
@@ -925,6 +943,95 @@ def test_refreshed_token_is_persisted_and_used_for_resolver_request(
     assert refreshed.access_token.value.get_secret_value() == REFRESHED_ACCESS
     assert refreshed.refresh_token is not None
     assert refreshed.refresh_token.value.get_secret_value() == REFRESHED_REFRESH
+
+
+def test_refresh_without_new_refresh_token_preserves_old_refresh_token(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    env_file, store_path, key = prepared_env(tmp_path, expired=True)
+    transport = E2EHttpTransport(
+        refresh_payload={
+            "access_token": REFRESHED_ACCESS,
+            "expires_in": 3599,
+            "scope": "",
+        }
+    )
+    install_test_doubles(monkeypatch, transport)
+
+    exit_code, output = invoke(*_common_args(env_file))
+
+    assert exit_code == 0, output
+    refreshed = _load_token_set(store_path, key)
+    assert refreshed.access_token.value.get_secret_value() == REFRESHED_ACCESS
+    assert refreshed.refresh_token is not None
+    assert refreshed.refresh_token.value.get_secret_value() == RAW_REFRESH
+    assert refreshed.expires_at is not None
+    assert refreshed.expires_at > datetime.now(timezone.utc)
+
+
+def test_token_status_after_refresh_reports_access_token_not_expired(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    env_file, store_path, _key = prepared_env(tmp_path, expired=True)
+    transport = E2EHttpTransport()
+    install_test_doubles(monkeypatch, transport)
+
+    exit_code, output = invoke(*_common_args(env_file))
+    status = CliRunner().invoke(
+        app,
+        [
+            "oauth",
+            "token-status",
+            "--env-file",
+            str(env_file),
+            "--token-store-path",
+            str(store_path),
+        ],
+    )
+
+    assert exit_code == 0, output
+    assert status.exit_code == 0, status.output
+    assert json.loads(status.output)["access_token_expired"] is False
+
+
+def test_refresh_http_400_reports_auth_stage(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    env_file, _store_path, _key = prepared_env(tmp_path, expired=True)
+    transport = E2EHttpTransport(refresh_status=400, refresh_text='{"error":"invalid_grant"}')
+    install_test_doubles(monkeypatch, transport)
+
+    exit_code, output = invoke(*_common_args(env_file))
+
+    assert exit_code != 0
+    assert "stage=auth" in output
+    assert "reason=token_refresh_failed" in output
+    assert "stage=resolver" not in output
+    assert RAW_ACCESS not in output
+    assert RAW_REFRESH not in output
+    assert CLIENT_SECRET not in output
+
+
+def test_refresh_parse_failure_reports_auth_stage(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    env_file, _store_path, _key = prepared_env(tmp_path, expired=True)
+    transport = E2EHttpTransport(refresh_text="{")
+    install_test_doubles(monkeypatch, transport)
+
+    exit_code, output = invoke(*_common_args(env_file))
+
+    assert exit_code != 0
+    assert "stage=auth" in output
+    assert "reason=token_refresh_response_invalid" in output
+    assert "stage=resolver" not in output
+    assert RAW_ACCESS not in output
+    assert RAW_REFRESH not in output
+    assert CLIENT_SECRET not in output
 
 
 def test_workspace_is_cleaned_after_successful_download(

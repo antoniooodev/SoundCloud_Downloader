@@ -21,6 +21,8 @@ from soundcloud_downloader.application import (
     select_transcoding,
 )
 from soundcloud_downloader.application.ports import (
+    AccessTokenProviderError,
+    AccessTokenProviderFailureReason,
     SoundCloudPlaylistSummary,
     SoundCloudResolvedResource,
     SoundCloudResolveStatus,
@@ -278,6 +280,79 @@ def test_workflow_gets_access_token_through_injected_provider() -> None:
     run(workflow.download_track(_request()))
 
     assert workflow.access_token_provider.calls == 1
+
+
+def test_auth_refresh_failure_is_reported_as_auth_not_resolver() -> None:
+    workflow = _workflow(
+        access_token_provider=FakeAccessTokenProvider(
+            error=AccessTokenProviderError(
+                ErrorCode.NETWORK_PERMANENT,
+                "OAuth token refresh failed.",
+                reason=AccessTokenProviderFailureReason.TOKEN_REFRESH_FAILED,
+            )
+        )
+    )
+
+    with pytest.raises(TrackDownloadWorkflowError) as exc_info:
+        run(workflow.download_track(_request()))
+
+    assert exc_info.value.stage is TrackDownloadFailureStage.AUTH
+    assert exc_info.value.reason is TrackDownloadFailureReason.TOKEN_REFRESH_FAILED
+
+
+def test_auth_failure_from_official_resolver_token_fetch_is_not_reported_as_resolver() -> None:
+    workflow = _workflow(
+        resolver=FakeResolver(
+            _resolved_track(),
+            error=AccessTokenProviderError(
+                ErrorCode.NETWORK_PERMANENT,
+                "OAuth token refresh failed.",
+                reason=AccessTokenProviderFailureReason.TOKEN_REFRESH_FAILED,
+            ),
+        )
+    )
+
+    with pytest.raises(TrackDownloadWorkflowError) as exc_info:
+        run(workflow.download_track(_request()))
+
+    assert exc_info.value.stage is TrackDownloadFailureStage.AUTH
+    assert exc_info.value.reason is TrackDownloadFailureReason.TOKEN_REFRESH_FAILED
+
+
+def test_auth_refresh_parse_failure_is_reported_as_auth_not_resolver() -> None:
+    workflow = _workflow(
+        access_token_provider=FakeAccessTokenProvider(
+            error=AccessTokenProviderError(
+                ErrorCode.UNKNOWN_UNSAFE,
+                "OAuth token refresh produced an invalid token response.",
+                reason=AccessTokenProviderFailureReason.TOKEN_REFRESH_RESPONSE_INVALID,
+            )
+        )
+    )
+
+    with pytest.raises(TrackDownloadWorkflowError) as exc_info:
+        run(workflow.download_track(_request()))
+
+    assert exc_info.value.stage is TrackDownloadFailureStage.AUTH
+    assert exc_info.value.reason is TrackDownloadFailureReason.TOKEN_REFRESH_RESPONSE_INVALID
+
+
+def test_auth_refresh_persist_failure_is_reported_as_auth_not_resolver() -> None:
+    workflow = _workflow(
+        access_token_provider=FakeAccessTokenProvider(
+            error=AccessTokenProviderError(
+                ErrorCode.STORAGE_FAILED,
+                "OAuth token refresh could not be persisted safely.",
+                reason=AccessTokenProviderFailureReason.TOKEN_REFRESH_PERSIST_FAILED,
+            )
+        )
+    )
+
+    with pytest.raises(TrackDownloadWorkflowError) as exc_info:
+        run(workflow.download_track(_request()))
+
+    assert exc_info.value.stage is TrackDownloadFailureStage.AUTH
+    assert exc_info.value.reason is TrackDownloadFailureReason.TOKEN_REFRESH_PERSIST_FAILED
 
 
 def test_workflow_resolves_transcoding_endpoint_through_injected_service() -> None:
@@ -648,21 +723,32 @@ class WorkflowFixture:
 
 
 class FakeResolver:
-    def __init__(self, resource: SoundCloudResolvedResource) -> None:
+    def __init__(
+        self,
+        resource: SoundCloudResolvedResource,
+        *,
+        error: Exception | None = None,
+    ) -> None:
         self.resource = resource
+        self.error = error
         self.calls: list[NormalizedResolverInput] = []
 
     async def resolve(self, normalized: NormalizedResolverInput) -> SoundCloudResolvedResource:
         self.calls.append(normalized)
+        if self.error is not None:
+            raise self.error
         return self.resource
 
 
 class FakeAccessTokenProvider:
-    def __init__(self) -> None:
+    def __init__(self, *, error: Exception | None = None) -> None:
         self.calls = 0
+        self.error = error
 
     async def get_access_token(self) -> SoundCloudAccessToken:
         self.calls += 1
+        if self.error is not None:
+            raise self.error
         return SoundCloudAccessToken(value=SecretStr("raw-access-token"))
 
 
@@ -849,6 +935,8 @@ class FakeAudioExporter:
 def _workflow(
     *,
     resource: SoundCloudResolvedResource | None = None,
+    resolver: FakeResolver | None = None,
+    access_token_provider: FakeAccessTokenProvider | None = None,
     stream: SoundCloudResolvedStream | None = None,
     endpoint_resolver: FakeEndpointResolver | None = None,
     official_streams_resolver: FakeOfficialStreamsResolver | None = None,
@@ -859,8 +947,8 @@ def _workflow(
     remuxer: FakeM4ARemuxer | None = None,
     audio_exporter: FakeAudioExporter | None = None,
 ) -> WorkflowFixture:
-    resolver = FakeResolver(resource or _resolved_track())
-    access_token_provider = FakeAccessTokenProvider()
+    resolver = resolver or FakeResolver(resource or _resolved_track())
+    access_token_provider = access_token_provider or FakeAccessTokenProvider()
     metadata_normalizer = CountingMetadataNormalizer()
     endpoint_resolver = endpoint_resolver or FakeEndpointResolver(stream=stream)
     stream_analysis = stream_analysis or FakeStreamAnalysis()

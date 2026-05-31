@@ -1,4 +1,8 @@
-from soundcloud_downloader.application.ports.auth import AccessTokenProviderPort
+from soundcloud_downloader.application.ports.auth import (
+    AccessTokenProviderError,
+    AccessTokenProviderFailureReason,
+    AccessTokenProviderPort,
+)
 from soundcloud_downloader.application.ports.oauth import (
     OAuthRefreshTokenPort,
     OAuthTokenExchangePort,
@@ -17,6 +21,8 @@ from soundcloud_downloader.application.ports.soundcloud import (
 
 __all__ = [
     "AccessTokenProviderPort",
+    "AccessTokenProviderError",
+    "AccessTokenProviderFailureReason",
     "OAuthRefreshTokenPort",
     "OAuthTokenExchangePort",
     "SoundCloudMetadataPort",

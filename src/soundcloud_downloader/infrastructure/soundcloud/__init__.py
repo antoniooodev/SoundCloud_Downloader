@@ -24,6 +24,7 @@ from soundcloud_downloader.infrastructure.soundcloud.oauth_token_exchange import
 )
 from soundcloud_downloader.infrastructure.soundcloud.oauth_refresh import (
     OAuthRefreshTokenError,
+    OAuthRefreshTokenResponseInvalidError,
     OAuthRefreshTokenService,
 )
 from soundcloud_downloader.infrastructure.soundcloud.official_resolver import (
@@ -49,6 +50,7 @@ __all__ = [
     "OAuthTokenExchangeError",
     "OAuthTokenExchangeService",
     "OAuthRefreshTokenError",
+    "OAuthRefreshTokenResponseInvalidError",
     "OAuthRefreshTokenService",
     "OfficialSoundCloudResolver",
     "OfficialStreamsClient",

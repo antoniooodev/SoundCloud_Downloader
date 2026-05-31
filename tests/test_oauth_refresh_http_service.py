@@ -58,6 +58,13 @@ def test_successful_mocked_refresh_response_returns_oauth_token_response() -> No
     assert isinstance(response, OAuthTokenResponse)
 
 
+def test_successful_refresh_response_with_empty_scope_is_accepted() -> None:
+    response = run(_refresh_with_response(_success_response_body(scope="")))
+
+    assert isinstance(response, OAuthTokenResponse)
+    assert response.scope is None
+
+
 def test_returned_oauth_token_response_repr_does_not_expose_access_token() -> None:
     response = run(_refresh_with_response(_success_response_body()))
 
@@ -273,12 +280,12 @@ def _capture_successful_request() -> dict[str, object]:
     return seen
 
 
-def _success_response_body(*, expires_in: int = 3600) -> str:
+def _success_response_body(*, expires_in: int = 3600, scope: str = "read") -> str:
     return json.dumps(
         {
             "access_token": RAW_ACCESS_TOKEN,
             "refresh_token": RAW_NEW_REFRESH_TOKEN,
             "expires_in": expires_in,
-            "scope": "read",
+            "scope": scope,
         }
     )

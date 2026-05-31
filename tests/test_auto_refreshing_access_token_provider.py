@@ -8,6 +8,8 @@ import pytest
 from pydantic import SecretStr
 
 from soundcloud_downloader.application.ports import (
+    AccessTokenProviderError,
+    AccessTokenProviderFailureReason,
     AccessTokenProviderPort,
     OAuthRefreshTokenPort,
 )
@@ -175,28 +177,45 @@ def test_provider_replaces_old_refresh_token_with_new_refresh_token_from_respons
     assert saved_token_set.refresh_token.value.get_secret_value() == RAW_NEW_REFRESH_TOKEN
 
 
-def test_provider_persists_refresh_token_none_when_refresh_response_omits_refresh_token() -> None:
+def test_provider_keeps_old_refresh_token_when_refresh_response_omits_refresh_token() -> None:
     store = _store_with(_token_set(expires_at=_past(seconds=1)))
     refresh_service = FakeRefreshService(response=_token_response(refresh_token=None))
 
     run(_provider(store, refresh_service).get_access_token())
 
-    assert store.saved[-1].refresh_token is None
+    saved_token_set = store.saved[-1]
+    assert saved_token_set.refresh_token is not None
+    assert saved_token_set.refresh_token.value.get_secret_value() == RAW_OLD_REFRESH_TOKEN
 
 
-def test_future_refresh_fails_closed_when_saved_token_has_no_refresh_token_and_later_expires() -> None:
+def test_future_refresh_reuses_preserved_refresh_token_when_response_omits_refresh_token() -> None:
     store = _store_with(_token_set(expires_at=_past(seconds=1)))
     refresh_service = FakeRefreshService(response=_token_response(refresh_token=None, expires_in=1))
     provider = _provider(store, refresh_service)
     run(provider.get_access_token())
-    stored_without_refresh = store.saved[-1]
-    store.items["default"] = stored_without_refresh.model_copy(update={"expires_at": _past(seconds=1)})
+    stored_with_preserved_refresh = store.saved[-1]
+    store.items["default"] = stored_with_preserved_refresh.model_copy(
+        update={"expires_at": _past(seconds=1)}
+    )
 
-    with pytest.raises(SoundcloudDownloaderError) as exc_info:
-        run(provider.get_access_token())
+    run(provider.get_access_token())
 
-    _assert_safe_exception(exc_info.value)
-    assert len(refresh_service.calls) == 1
+    assert len(refresh_service.calls) == 2
+    assert refresh_service.calls[-1]["refresh_token"] == stored_with_preserved_refresh.refresh_token
+
+
+def test_provider_persists_expires_at_from_refreshed_expires_in() -> None:
+    store = _store_with(_token_set(expires_at=_past(seconds=1)))
+    refresh_service = FakeRefreshService(response=_token_response(expires_in=3599))
+    before_refresh = _now()
+
+    run(_provider(store, refresh_service).get_access_token())
+
+    saved_token_set = store.saved[-1]
+    assert saved_token_set.expires_at is not None
+    assert saved_token_set.expires_at > before_refresh + timedelta(seconds=3500)
+    assert saved_token_set.expires_at < before_refresh + timedelta(seconds=3700)
+    assert saved_token_set.is_expired() is False
 
 
 def test_provider_fails_closed_when_token_is_missing() -> None:
@@ -227,6 +246,19 @@ def test_provider_propagates_or_wraps_refresh_service_failure_safely() -> None:
         run(_provider(store, refresh_service).get_access_token())
 
     _assert_safe_exception(exc_info.value)
+    assert isinstance(exc_info.value, AccessTokenProviderError)
+    assert exc_info.value.reason is AccessTokenProviderFailureReason.TOKEN_REFRESH_FAILED
+
+
+def test_provider_classifies_invalid_refresh_response() -> None:
+    store = _store_with(_token_set(expires_at=_past(seconds=1)))
+    refresh_service = FakeRefreshService(response=object())  # type: ignore[arg-type]
+
+    with pytest.raises(AccessTokenProviderError) as exc_info:
+        run(_provider(store, refresh_service).get_access_token())
+
+    assert exc_info.value.reason is AccessTokenProviderFailureReason.TOKEN_REFRESH_RESPONSE_INVALID
+    _assert_safe_exception(exc_info.value)
 
 
 def test_provider_fails_closed_when_token_store_save_fails() -> None:
@@ -237,6 +269,8 @@ def test_provider_fails_closed_when_token_store_save_fails() -> None:
         run(_provider(store, FakeRefreshService()).get_access_token())
 
     _assert_safe_exception(exc_info.value)
+    assert isinstance(exc_info.value, AccessTokenProviderError)
+    assert exc_info.value.reason is AccessTokenProviderFailureReason.TOKEN_REFRESH_PERSIST_FAILED
 
 
 def test_provider_uses_default_profile_id() -> None:

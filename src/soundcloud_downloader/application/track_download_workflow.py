@@ -14,6 +14,8 @@ from soundcloud_downloader.application.metadata_normalizer import (
     SoundCloudMetadataNormalizer,
 )
 from soundcloud_downloader.application.ports import (
+    AccessTokenProviderError,
+    AccessTokenProviderFailureReason,
     AccessTokenProviderPort,
     SoundCloudResolveStatus,
     SoundCloudResolverPort,
@@ -60,6 +62,7 @@ _POLICY_DENIED_ERROR_MESSAGE = "Track reconstruction was denied by policy."
 
 
 class TrackDownloadFailureStage(str, Enum):
+    AUTH = "auth"
     RESOLVER = "resolver"
     METADATA_NORMALIZATION = "metadata_normalization"
     TRANSCODING_SELECTION = "transcoding_selection"
@@ -76,6 +79,9 @@ class TrackDownloadFailureStage(str, Enum):
 
 
 class TrackDownloadFailureReason(str, Enum):
+    TOKEN_REFRESH_FAILED = "token_refresh_failed"
+    TOKEN_REFRESH_RESPONSE_INVALID = "token_refresh_response_invalid"
+    TOKEN_REFRESH_PERSIST_FAILED = "token_refresh_persist_failed"
     OFFICIAL_RESOLVER_PAYLOAD_INVALID = "official_resolver_payload_invalid"
     RESOLVED_RESOURCE_NOT_TRACK = "resolved_resource_not_track"
     NO_TRANSCODINGS = "no_transcodings"
@@ -201,6 +207,8 @@ class TrackDownloadWorkflow:
             try:
                 normalized_input = self._resolver_input_normalizer.normalize(request.source_url)
                 resolved_resource = await self._resolver.resolve(normalized_input)
+            except AccessTokenProviderError as exc:
+                raise _auth_workflow_error(exc) from exc
             except Exception as exc:
                 raise TrackDownloadWorkflowError(
                     ErrorCode.UNKNOWN_UNSAFE,
@@ -244,7 +252,10 @@ class TrackDownloadWorkflow:
                 for item in resolved_resource.track.transcodings
                 if isinstance(item, SoundCloudTranscodingMetadata)
             )
-            access_token = await self._access_token_provider.get_access_token()
+            try:
+                access_token = await self._access_token_provider.get_access_token()
+            except AccessTokenProviderError as exc:
+                raise _auth_workflow_error(exc) from exc
             if transcodings:
                 transcoding, stream = await self._stream_from_transcoding_endpoint(
                     transcodings,
@@ -553,3 +564,22 @@ def _output_path(output_format: AudioExportFormat) -> ArtifactRelativePath:
     if output_format is AudioExportFormat.WAV:
         return ArtifactRelativePath(value="audio/final.wav")
     return ArtifactRelativePath(value="audio/final.m4a")
+
+
+def _auth_workflow_error(exc: AccessTokenProviderError) -> TrackDownloadWorkflowError:
+    return TrackDownloadWorkflowError(
+        exc.code,
+        _WORKFLOW_ERROR_MESSAGE,
+        stage=TrackDownloadFailureStage.AUTH,
+        reason=_auth_failure_reason(exc.reason),
+    )
+
+
+def _auth_failure_reason(
+    reason: AccessTokenProviderFailureReason,
+) -> TrackDownloadFailureReason:
+    if reason is AccessTokenProviderFailureReason.TOKEN_REFRESH_RESPONSE_INVALID:
+        return TrackDownloadFailureReason.TOKEN_REFRESH_RESPONSE_INVALID
+    if reason is AccessTokenProviderFailureReason.TOKEN_REFRESH_PERSIST_FAILED:
+        return TrackDownloadFailureReason.TOKEN_REFRESH_PERSIST_FAILED
+    return TrackDownloadFailureReason.TOKEN_REFRESH_FAILED

@@ -3,7 +3,12 @@ from datetime import datetime, timedelta, timezone
 from pydantic import SecretStr
 
 from soundcloud_downloader.application import OAuthTokenStore
-from soundcloud_downloader.application.ports import AccessTokenProviderPort, OAuthRefreshTokenPort
+from soundcloud_downloader.application.ports import (
+    AccessTokenProviderError,
+    AccessTokenProviderFailureReason,
+    AccessTokenProviderPort,
+    OAuthRefreshTokenPort,
+)
 from soundcloud_downloader.domain import (
     ErrorCode,
     OAuthClientId,
@@ -12,7 +17,10 @@ from soundcloud_downloader.domain import (
     SoundcloudDownloaderError,
     StoredOAuthTokenSet,
 )
-from soundcloud_downloader.infrastructure.soundcloud import SoundCloudAccessToken
+from soundcloud_downloader.infrastructure.soundcloud import (
+    OAuthRefreshTokenResponseInvalidError,
+    SoundCloudAccessToken,
+)
 
 
 class AutoRefreshingAccessTokenProvider:
@@ -60,12 +68,23 @@ class AutoRefreshingAccessTokenProvider:
                 client_secret=self._client_secret,
                 refresh_token=token_set.refresh_token,
             )
-        except SoundcloudDownloaderError:
-            raise
+        except OAuthRefreshTokenResponseInvalidError as exc:
+            raise AccessTokenProviderError(
+                exc.code,
+                "OAuth token refresh response was invalid.",
+                reason=AccessTokenProviderFailureReason.TOKEN_REFRESH_RESPONSE_INVALID,
+            ) from exc
+        except SoundcloudDownloaderError as exc:
+            raise AccessTokenProviderError(
+                exc.code,
+                "OAuth token refresh failed.",
+                reason=AccessTokenProviderFailureReason.TOKEN_REFRESH_FAILED,
+            ) from exc
         except Exception as exc:
-            raise SoundcloudDownloaderError(
+            raise AccessTokenProviderError(
                 ErrorCode.UNKNOWN_UNSAFE,
                 "OAuth token refresh failed safely.",
+                reason=AccessTokenProviderFailureReason.TOKEN_REFRESH_FAILED,
             ) from exc
 
         try:
@@ -73,18 +92,24 @@ class AutoRefreshingAccessTokenProvider:
                 profile_id=self._profile_id,
                 token_response=token_response,
             )
+            if token_response.refresh_token is None:
+                refreshed_token_set = refreshed_token_set.model_copy(
+                    update={"refresh_token": token_set.refresh_token}
+                )
         except Exception as exc:
-            raise SoundcloudDownloaderError(
+            raise AccessTokenProviderError(
                 ErrorCode.UNKNOWN_UNSAFE,
                 "OAuth token refresh produced an invalid token response.",
+                reason=AccessTokenProviderFailureReason.TOKEN_REFRESH_RESPONSE_INVALID,
             ) from exc
 
         try:
             self._token_store.save(refreshed_token_set)
         except Exception as exc:
-            raise SoundcloudDownloaderError(
+            raise AccessTokenProviderError(
                 ErrorCode.STORAGE_FAILED,
                 "OAuth token refresh could not be persisted safely.",
+                reason=AccessTokenProviderFailureReason.TOKEN_REFRESH_PERSIST_FAILED,
             ) from exc
 
         return _to_soundcloud_access_token(refreshed_token_set)

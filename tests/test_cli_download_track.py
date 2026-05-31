@@ -619,6 +619,35 @@ def test_workflow_failure_prints_safe_stage_and_reason(
     assert "invalid_fields=media.transcodings.0.url" in output
 
 
+def test_auth_workflow_failure_prints_auth_stage_and_reason(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    env_file = base_env_file(tmp_path)
+    install_fake_workflow(
+        monkeypatch,
+        FakeWorkflow(
+            error=TrackDownloadWorkflowError(
+                ErrorCode.NETWORK_PERMANENT,
+                "Track download workflow failed.",
+                stage=TrackDownloadFailureStage.AUTH,
+                reason=TrackDownloadFailureReason.TOKEN_REFRESH_FAILED,
+            )
+        ),
+    )
+
+    exit_code, output = invoke_download(TRACK_URL, "--env-file", str(env_file))
+
+    assert exit_code != 0
+    assert "Track download failed." in output
+    assert "stage=auth" in output
+    assert "reason=token_refresh_failed" in output
+    assert "stage=resolver" not in output
+    assert RAW_ACCESS not in output
+    assert RAW_REFRESH not in output
+    assert CLIENT_SECRET not in output
+
+
 def test_workflow_failure_invalid_fields_do_not_leak_sensitive_values(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

@@ -182,6 +182,4 @@ class OAuthTokenResponse(BaseModel):
     @field_validator("scope")
     @classmethod
     def validate_scope(cls, value: str | None) -> str | None:
-        if value == "":
-            raise ValueError("OAuth token response scope must not be empty when provided.")
         return value
