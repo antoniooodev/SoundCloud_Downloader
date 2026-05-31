@@ -753,7 +753,7 @@ def test_official_malformed_payload_prints_invalid_fields_safely(
     assert isinstance(transcodings, list)
     first = transcodings[0]
     assert isinstance(first, dict)
-    raw_url = "https://api.soundcloud.test/media/secret-url?access_token=raw-token"
+    raw_url = "/media/secret-url?access_token=raw-token"
     first["url"] = raw_url
     transport = MockSoundCloudTransport(resolve_payload=payload)
     patch_http_client(monkeypatch, transport)

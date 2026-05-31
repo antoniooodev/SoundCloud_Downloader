@@ -1,7 +1,7 @@
 from enum import Enum
-from urllib.parse import parse_qsl, urlsplit
+from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, SecretStr, field_serializer, field_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_serializer, field_validator
 
 
 class SoundCloudTranscodingProtocol(str, Enum):
@@ -16,18 +16,6 @@ class SoundCloudTranscodingMimeType(str, Enum):
     AUDIO_AAC = "audio/aac"
     APPLICATION_VND_APPLE_MPEGURL = "application/vnd.apple.mpegurl"
     UNKNOWN = "unknown"
-
-
-_FORBIDDEN_ENDPOINT_QUERY_KEYS = frozenset(
-    {
-        "access_token",
-        "authorization",
-        "client_secret",
-        "cookie",
-        "refresh_token",
-        "set-cookie",
-    }
-)
 
 
 class SoundCloudTranscodingEndpointUrl(BaseModel):
@@ -47,16 +35,6 @@ class SoundCloudTranscodingEndpointUrl(BaseModel):
         if parsed.username is not None or parsed.password is not None:
             raise ValueError(
                 "SoundCloud transcoding endpoint URL must not contain userinfo credentials."
-            )
-        lowered_url = raw_url.lower()
-        if any(forbidden_key in lowered_url for forbidden_key in _FORBIDDEN_ENDPOINT_QUERY_KEYS):
-            raise ValueError(
-                "SoundCloud transcoding endpoint URL must not contain sensitive URL material."
-            )
-        query_keys = {key.lower() for key, _value in parse_qsl(parsed.query, keep_blank_values=True)}
-        if query_keys & _FORBIDDEN_ENDPOINT_QUERY_KEYS:
-            raise ValueError(
-                "SoundCloud transcoding endpoint URL must not contain sensitive query keys."
             )
         return value
 
@@ -81,6 +59,7 @@ class SoundCloudTranscodingMetadata(BaseModel):
     preset: str | None = None
     quality: str | None = None
     snipped: bool | None = None
+    duration_ms: int | None = Field(default=None, ge=0)
     format: SoundCloudTranscodingFormat
     endpoint_url: SoundCloudTranscodingEndpointUrl
 

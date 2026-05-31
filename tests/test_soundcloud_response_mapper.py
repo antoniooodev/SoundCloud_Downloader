@@ -23,6 +23,10 @@ from soundcloud_downloader.infrastructure.soundcloud import (
 RAW_RESOLVER_STREAM_URL = (
     "https://api.soundcloud.test/tracks/123/stream?client_secret=SHOULD_NOT_LEAK"
 )
+RAW_REAL_TRANSCODING_URL = (
+    "https://api.soundcloud.test/media/soundcloud:tracks:123/abc/stream/hls"
+    "?client_secret=SHOULD_NOT_LEAK"
+)
 
 
 def normalized() -> NormalizedResolverInput:
@@ -89,11 +93,13 @@ def official_track_payload() -> dict[str, object]:
         "media": {
             "transcodings": [
                 {
-                    "url": "https://api.soundcloud.invalid/media/secret-stream-url",
+                    "url": RAW_REAL_TRANSCODING_URL,
                     "preset": "mp3_1_0",
                     "quality": "sq",
+                    "duration": 12_345,
+                    "snipped": False,
                     "format": {
-                        "protocol": "progressive",
+                        "protocol": "hls",
                         "mime_type": "audio/mpeg",
                     },
                 }
@@ -304,6 +310,17 @@ def test_top_level_stream_url_is_not_logged(caplog: pytest.LogCaptureFixture) ->
     assert "SHOULD_NOT_LEAK" not in caplog.text
 
 
+def test_transcoding_endpoint_url_is_not_logged(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.DEBUG)
+    payload = official_track_payload()
+
+    resource = SoundCloudResponseMapper().map_resolved_resource(payload, normalized())
+
+    assert resource.status is SoundCloudResolveStatus.RESOLVED
+    assert RAW_REAL_TRANSCODING_URL not in caplog.text
+    assert "SHOULD_NOT_LEAK" not in caplog.text
+
+
 def test_maps_real_like_official_track_payload_with_extra_fields() -> None:
     payload = official_track_payload()
     payload.update(
@@ -374,6 +391,8 @@ def test_track_payload_maps_hls_transcoding_metadata() -> None:
     assert transcoding.format.mime_type is SoundCloudTranscodingMimeType.AUDIO_MPEG
     assert transcoding.preset == "mp3_1_0"
     assert transcoding.quality == "sq"
+    assert transcoding.duration_ms == 12_345
+    assert transcoding.snipped is False
     assert transcoding.is_hls is True
 
 
@@ -421,10 +440,13 @@ def test_track_payload_maps_hls_transcoding_mime_type() -> None:
 
 
 def test_track_payload_maps_progressive_transcoding_metadata() -> None:
-    resource = SoundCloudResponseMapper().map_resolved_resource(
-        official_track_payload(),
-        normalized(),
-    )
+    payload = official_track_payload()
+    transcoding_payload = _first_official_transcoding(payload)
+    format_payload = transcoding_payload["format"]
+    assert isinstance(format_payload, dict)
+    format_payload["protocol"] = "progressive"
+
+    resource = SoundCloudResponseMapper().map_resolved_resource(payload, normalized())
 
     assert resource.status is SoundCloudResolveStatus.RESOLVED
     assert resource.track is not None
@@ -524,18 +546,18 @@ def test_invalid_transcoding_endpoint_url_rejects_safely() -> None:
     assert resource.invalid_fields == ("media.transcodings.0.url",)
 
 
-def test_mapper_validation_error_exposes_invalid_fields_only() -> None:
+def test_signed_transcoding_endpoint_url_is_preserved_and_redacted() -> None:
     payload = official_track_payload()
-    raw_url = "https://api.soundcloud.invalid/media/transcoding?access_token=raw-secret"
-    _first_official_transcoding(payload)["url"] = raw_url
 
     resource = SoundCloudResponseMapper().map_resolved_resource(payload, normalized())
     dumped = repr(resource) + str(resource.model_dump(mode="json"))
 
-    assert resource.status is SoundCloudResolveStatus.ERROR
-    assert resource.invalid_fields == ("media.transcodings.0.url",)
-    assert raw_url not in dumped
-    assert "raw-secret" not in dumped
+    assert resource.status is SoundCloudResolveStatus.RESOLVED
+    assert resource.track is not None
+    assert isinstance(resource.track.transcodings[0], SoundCloudTranscodingMetadata)
+    assert resource.track.transcodings[0].endpoint_url.get_secret_value() == RAW_REAL_TRANSCODING_URL
+    assert RAW_REAL_TRANSCODING_URL not in dumped
+    assert "SHOULD_NOT_LEAK" not in dumped
 
 
 def test_invalid_fields_do_not_contain_source_url() -> None:
@@ -631,10 +653,11 @@ def test_raw_transcoding_url_does_not_appear_in_exception_messages() -> None:
     _first_official_transcoding(payload)["url"] = raw_url
 
     resource = SoundCloudResponseMapper().map_resolved_resource(payload, normalized())
+    dumped = repr(resource) + str(resource.model_dump(mode="json")) + " ".join(resource.warnings)
 
-    assert resource.status is SoundCloudResolveStatus.ERROR
-    assert raw_url not in " ".join(resource.warnings)
-    assert "raw-secret" not in " ".join(resource.warnings)
+    assert resource.status is SoundCloudResolveStatus.RESOLVED
+    assert raw_url not in dumped
+    assert "raw-secret" not in dumped
 
 
 def test_maps_official_like_playlist_payload() -> None:

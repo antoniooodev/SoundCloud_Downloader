@@ -69,6 +69,7 @@ from soundcloud_downloader.domain import (
     TrackDownloadStatus,
     redact_track_download_result,
 )
+from soundcloud_downloader.infrastructure.soundcloud import SoundCloudResponseMapper
 from soundcloud_downloader.infrastructure.soundcloud.api_contract import SoundCloudAccessToken
 
 T = TypeVar("T")
@@ -76,6 +77,10 @@ T = TypeVar("T")
 RAW_SOURCE_URL = "https://soundcloud.com/artist/example-track"
 UNSAFE_SOURCE_URL = "https://soundcloud.com/artist/example-track?access_token=raw-token"
 RAW_ENDPOINT_URL = "https://api.soundcloud.test/tracks/123/transcodings/hls"
+RAW_REAL_ENDPOINT_URL = (
+    "https://api.soundcloud.test/media/soundcloud:tracks:123/abc/stream/hls"
+    "?client_secret=SHOULD_NOT_LEAK"
+)
 RAW_STREAM_URL = "https://media.soundcloud.test/playlist.m3u8?Policy=stream-policy"
 RAW_PROGRESSIVE_URL = "https://media.soundcloud.test/audio.mp3?Policy=stream-policy"
 RAW_SEGMENT_URL = "https://media.soundcloud.test/segment0.ts?Policy=segment-policy"
@@ -197,6 +202,27 @@ def test_workflow_resolves_transcoding_endpoint_through_injected_service() -> No
     run(workflow.download_track(_request()))
 
     assert workflow.endpoint_resolver.calls == [workflow.resolver.resource.track.transcodings[0]]
+
+
+def test_workflow_sees_real_like_resolver_media_transcodings() -> None:
+    resource = _real_like_resolved_track()
+    workflow = _workflow(resource=resource)
+
+    run(workflow.download_track(_request()))
+
+    assert resource.track is not None
+    assert len(resource.track.transcodings) == 1
+    assert workflow.endpoint_resolver.calls == [resource.track.transcodings[0]]
+    assert workflow.endpoint_resolver.calls[0].endpoint_url.get_secret_value() == RAW_REAL_ENDPOINT_URL
+
+
+def test_workflow_does_not_report_no_transcodings_for_real_like_payload() -> None:
+    workflow = _workflow(resource=_real_like_resolved_track())
+
+    result = run(workflow.download_track(_request()))
+
+    assert result.status is TrackDownloadStatus.SUCCEEDED
+    assert result.selected_transcoding.format.protocol is SoundCloudTranscodingProtocol.HLS
 
 
 def test_workflow_rejects_progressive_resolved_stream_for_this_mvp() -> None:
@@ -822,6 +848,37 @@ def _unresolved_resource() -> SoundCloudResolvedResource:
         warnings=("SoundCloud resolver payload was malformed.",),
         invalid_fields=("media.transcodings.0.url",),
     )
+
+
+def _real_like_resolved_track() -> SoundCloudResolvedResource:
+    resource = SoundCloudResponseMapper().map_resolved_resource(
+        {
+            "kind": "track",
+            "id": 123,
+            "title": "Real Like Track",
+            "duration": 30_000,
+            "sharing": "public",
+            "downloadable": False,
+            "media": {
+                "transcodings": [
+                    {
+                        "url": RAW_REAL_ENDPOINT_URL,
+                        "preset": "mp3_0_1",
+                        "duration": 12_345,
+                        "snipped": False,
+                        "format": {
+                            "protocol": "hls",
+                            "mime_type": "audio/mpeg",
+                        },
+                        "quality": "sq",
+                    }
+                ]
+            },
+        },
+        _normalized(),
+    )
+    assert resource.status is SoundCloudResolveStatus.RESOLVED
+    return resource
 
 
 def _user_summary() -> SoundCloudUserSummary:

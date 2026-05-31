@@ -350,6 +350,7 @@ class SoundCloudResponseMapper:
                 preset=self._optional_string(payload.get("preset"), f"{path}.preset"),
                 quality=self._optional_string(payload.get("quality"), f"{path}.quality"),
                 snipped=self._optional_bool(payload.get("snipped"), f"{path}.snipped"),
+                duration_ms=self._optional_int(payload.get("duration"), f"{path}.duration"),
                 format=SoundCloudTranscodingFormat(
                     protocol=self._transcoding_protocol(
                         format_payload.get("protocol"), f"{path}.format.protocol"

@@ -37,6 +37,10 @@ RESOLVE_HOST = "api.soundcloud.test"
 AUTH_HOST = "auth.soundcloud.test"
 MEDIA_HOST = "cdn.example.test"
 TRANSCODING_URL = f"https://{RESOLVE_HOST}/tracks/123/transcodings/hls"
+REAL_LIKE_TRANSCODING_URL = (
+    f"https://{RESOLVE_HOST}/media/soundcloud:tracks:123/abc/stream/hls"
+    "?client_secret=SHOULD_NOT_LEAK"
+)
 STREAM_URL = f"https://{MEDIA_HOST}/manifest.m3u8"
 RAW_RESOLVER_STREAM_URL = (
     "https://api.soundcloud.test/tracks/123/stream?client_secret=SHOULD_NOT_LEAK"
@@ -219,7 +223,7 @@ class E2EHttpTransport:
         if path == "/tracks/123":
             return httpx.Response(200, json=self.resolve_payload, request=request)
         full_url = str(request.url)
-        if full_url == TRANSCODING_URL:
+        if full_url in {TRANSCODING_URL, REAL_LIKE_TRANSCODING_URL}:
             self.transcoding_calls += 1
             self.transcoding_authorizations.append(request.headers.get("authorization"))
             return httpx.Response(200, json={"url": self.stream_url}, request=request)
@@ -519,6 +523,30 @@ def test_e2e_pipeline_ignores_raw_resolver_stream_url_and_uses_transcodings(
     assert "SHOULD_NOT_LEAK" not in output
 
 
+def test_e2e_real_like_media_transcodings_succeed_without_url_leak(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    block_real_network(monkeypatch)
+    block_real_subprocess(monkeypatch)
+    env_file, _store, _key = prepared_env(tmp_path)
+    transport = E2EHttpTransport(
+        resolve_payload=official_track_payload(transcoding_url=REAL_LIKE_TRANSCODING_URL)
+    )
+    install_test_doubles(monkeypatch, transport)
+
+    exit_code, output = invoke(*_common_args(env_file))
+    payload = json.loads(output)
+
+    assert exit_code == 0, output
+    assert payload["status"] == "succeeded"
+    assert transport.transcoding_calls == 1
+    assert "stage=transcoding_selection" not in output
+    assert "reason=no_transcodings" not in output
+    assert REAL_LIKE_TRANSCODING_URL not in output
+    assert "SHOULD_NOT_LEAK" not in output
+
+
 def test_e2e_payload_with_stream_url_but_no_transcodings_fails_selection_safely(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -541,6 +569,33 @@ def test_e2e_payload_with_stream_url_but_no_transcodings_fails_selection_safely(
     assert "reason=no_transcodings" in output
     assert transport.transcoding_calls == 0
     assert RAW_RESOLVER_STREAM_URL not in output
+    assert "SHOULD_NOT_LEAK" not in output
+
+
+def test_e2e_progressive_only_transcoding_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    block_real_network(monkeypatch)
+    block_real_subprocess(monkeypatch)
+    env_file, _store, _key = prepared_env(tmp_path)
+    payload = official_track_payload(transcoding_url=REAL_LIKE_TRANSCODING_URL)
+    first = payload["media"]["transcodings"][0]  # type: ignore[index]
+    assert isinstance(first, dict)
+    format_payload = first["format"]
+    assert isinstance(format_payload, dict)
+    format_payload["protocol"] = "progressive"
+    transport = E2EHttpTransport(resolve_payload=payload)
+    install_test_doubles(monkeypatch, transport)
+
+    exit_code, output = invoke(*_common_args(env_file))
+
+    assert exit_code != 0
+    assert "Track download failed." in output
+    assert "stage=transcoding_selection" in output
+    assert "reason=no_safe_hls_transcoding" in output
+    assert transport.transcoding_calls == 0
+    assert REAL_LIKE_TRANSCODING_URL not in output
     assert "SHOULD_NOT_LEAK" not in output
 
 

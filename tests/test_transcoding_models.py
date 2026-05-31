@@ -14,6 +14,10 @@ from soundcloud_downloader.domain import (
 
 
 RAW_ENDPOINT_URL = "https://api.soundcloud.test/media/soundcloud:tracks:123/transcodings/hls"
+RAW_SIGNED_ENDPOINT_URL = (
+    "https://api.soundcloud.test/media/soundcloud:tracks:123/abc/stream/hls"
+    "?client_secret=SHOULD_NOT_LEAK"
+)
 
 
 def test_endpoint_url_accepts_absolute_https_url() -> None:
@@ -47,15 +51,12 @@ def test_endpoint_url_rejects_userinfo_credentials() -> None:
         )
 
 
-@pytest.mark.parametrize(
-    "query_key",
-    ["access_token", "refresh_token", "client_secret", "authorization", "cookie", "set-cookie"],
-)
-def test_endpoint_url_rejects_sensitive_query_keys(query_key: str) -> None:
-    with pytest.raises(ValidationError):
-        SoundCloudTranscodingEndpointUrl(
-            value=SecretStr(f"https://api.soundcloud.test/media/transcoding?{query_key}=raw")
-        )
+def test_endpoint_url_accepts_signed_query_but_keeps_it_secret() -> None:
+    endpoint_url = SoundCloudTranscodingEndpointUrl(value=SecretStr(RAW_SIGNED_ENDPOINT_URL))
+
+    assert endpoint_url.get_secret_value() == RAW_SIGNED_ENDPOINT_URL
+    assert RAW_SIGNED_ENDPOINT_URL not in repr(endpoint_url)
+    assert "SHOULD_NOT_LEAK" not in str(endpoint_url.model_dump(mode="json"))
 
 
 def test_endpoint_url_repr_does_not_expose_raw_url() -> None:
