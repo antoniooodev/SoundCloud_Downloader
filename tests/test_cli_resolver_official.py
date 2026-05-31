@@ -29,6 +29,9 @@ REFRESHED_REFRESH = "raw-refreshed-refresh-token"
 CLIENT_ID = "dummy-client-id"
 CLIENT_SECRET = "dummy-client-secret"
 STREAM_URL = "https://api.soundcloud.test/media/raw-stream-url"
+RAW_RESOLVER_STREAM_URL = (
+    "https://api.soundcloud.test/tracks/123/stream?client_secret=SHOULD_NOT_LEAK"
+)
 
 
 def invoke_resolver(*args: str) -> tuple[int, str]:
@@ -770,6 +773,30 @@ def test_official_malformed_payload_prints_invalid_fields_safely(
     assert "raw-token" not in output
     assert RAW_ACCESS not in output
     assert CLIENT_SECRET not in output
+
+
+def test_official_mode_accepts_and_ignores_top_level_stream_url(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    env_file, _token_store_path, _key = prepared_env(tmp_path)
+    payload = official_track_payload()
+    payload["stream_url"] = RAW_RESOLVER_STREAM_URL
+    transport = MockSoundCloudTransport(resolve_payload=payload)
+    patch_http_client(monkeypatch, transport)
+
+    exit_code, output = invoke_resolver(
+        "https://soundcloud.com/user/track",
+        "--official",
+        "--env-file",
+        str(env_file),
+    )
+
+    assert exit_code == 0, output
+    assert "official_resolver_payload_invalid" not in output
+    assert "stream_url" not in output
+    assert RAW_RESOLVER_STREAM_URL not in output
+    assert "SHOULD_NOT_LEAK" not in output
 
 
 def test_official_output_does_not_expose_secrets_or_stream_urls(

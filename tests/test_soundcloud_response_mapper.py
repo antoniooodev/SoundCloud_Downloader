@@ -1,3 +1,5 @@
+import logging
+
 import pytest
 from pydantic import ValidationError
 
@@ -16,6 +18,10 @@ from soundcloud_downloader.domain import (
 from soundcloud_downloader.infrastructure.soundcloud import (
     SoundCloudResponseMapper,
     summarize_soundcloud_payload_shape,
+)
+
+RAW_RESOLVER_STREAM_URL = (
+    "https://api.soundcloud.test/tracks/123/stream?client_secret=SHOULD_NOT_LEAK"
 )
 
 
@@ -247,6 +253,55 @@ def test_maps_official_like_track_payload() -> None:
     assert resource.track.title == "Official track"
     assert resource.track.user is not None
     assert resource.track.user.username == "artist"
+
+
+def test_maps_official_track_payload_with_top_level_stream_url() -> None:
+    payload = official_track_payload()
+    payload["stream_url"] = RAW_RESOLVER_STREAM_URL
+
+    resource = SoundCloudResponseMapper().map_resolved_resource(payload, normalized())
+
+    assert resource.status is SoundCloudResolveStatus.RESOLVED
+    assert resource.kind is SoundCloudResourceKind.TRACK
+    assert resource.track is not None
+    assert resource.track.transcodings
+    assert resource.invalid_fields == ()
+
+
+def test_top_level_stream_url_is_not_exposed_in_repr() -> None:
+    payload = official_track_payload()
+    payload["stream_url"] = RAW_RESOLVER_STREAM_URL
+
+    resource = SoundCloudResponseMapper().map_resolved_resource(payload, normalized())
+
+    assert resource.status is SoundCloudResolveStatus.RESOLVED
+    assert RAW_RESOLVER_STREAM_URL not in repr(resource)
+    assert "SHOULD_NOT_LEAK" not in repr(resource)
+
+
+def test_top_level_stream_url_is_not_exposed_in_model_dump() -> None:
+    payload = official_track_payload()
+    payload["stream_url"] = RAW_RESOLVER_STREAM_URL
+
+    resource = SoundCloudResponseMapper().map_resolved_resource(payload, normalized())
+    dumped = str(resource.model_dump(mode="json"))
+
+    assert resource.status is SoundCloudResolveStatus.RESOLVED
+    assert RAW_RESOLVER_STREAM_URL not in dumped
+    assert "SHOULD_NOT_LEAK" not in dumped
+    assert "stream_url" not in dumped
+
+
+def test_top_level_stream_url_is_not_logged(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.DEBUG)
+    payload = official_track_payload()
+    payload["stream_url"] = RAW_RESOLVER_STREAM_URL
+
+    resource = SoundCloudResponseMapper().map_resolved_resource(payload, normalized())
+
+    assert resource.status is SoundCloudResolveStatus.RESOLVED
+    assert RAW_RESOLVER_STREAM_URL not in caplog.text
+    assert "SHOULD_NOT_LEAK" not in caplog.text
 
 
 def test_maps_real_like_official_track_payload_with_extra_fields() -> None:

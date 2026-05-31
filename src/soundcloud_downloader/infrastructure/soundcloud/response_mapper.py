@@ -530,6 +530,8 @@ class SoundCloudResponseMapper:
         if isinstance(value, Mapping):
             for key, item in value.items():
                 path = prefix + (str(key),)
+                if prefix == () and str(key).lower() == "stream_url":
+                    continue
                 if str(key).lower() in _FORBIDDEN_KEYS:
                     return ".".join(path)
                 if nested_path := self._forbidden_key_path(item, prefix=path):
