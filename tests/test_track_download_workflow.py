@@ -146,6 +146,7 @@ def test_workflow_reports_resolver_stage_when_resolver_fails() -> None:
 
     assert exc_info.value.stage is TrackDownloadFailureStage.RESOLVER
     assert exc_info.value.reason is TrackDownloadFailureReason.OFFICIAL_RESOLVER_PAYLOAD_INVALID
+    assert exc_info.value.invalid_fields == ("media.transcodings.0.url",)
 
 
 def test_workflow_selects_non_snipped_hls_transcoding_over_snipped_hls() -> None:
@@ -819,6 +820,7 @@ def _unresolved_resource() -> SoundCloudResolvedResource:
         kind=SoundCloudResourceKind.UNKNOWN,
         normalized=_normalized(),
         warnings=("SoundCloud resolver payload was malformed.",),
+        invalid_fields=("media.transcodings.0.url",),
     )
 
 

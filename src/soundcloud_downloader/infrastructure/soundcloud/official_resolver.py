@@ -143,6 +143,7 @@ class OfficialSoundCloudResolver(SoundCloudResolverPort):
                 SoundCloudResourceKind.UNKNOWN,
                 normalized,
                 "Official SoundCloud resolve returned invalid JSON.",
+                invalid_fields=("unknown",),
             )
 
         if not isinstance(payload, Mapping):
@@ -151,6 +152,7 @@ class OfficialSoundCloudResolver(SoundCloudResolverPort):
                 SoundCloudResourceKind.UNKNOWN,
                 normalized,
                 "Official SoundCloud resolve returned a non-object JSON payload.",
+                invalid_fields=("unknown",),
             )
 
         return self._mapper.map_resolved_resource(payload, normalized)
@@ -161,10 +163,13 @@ class OfficialSoundCloudResolver(SoundCloudResolverPort):
         kind: SoundCloudResourceKind,
         normalized: NormalizedResolverInput,
         warning: str,
+        *,
+        invalid_fields: tuple[str, ...] = (),
     ) -> SoundCloudResolvedResource:
         return SoundCloudResolvedResource(
             status=status,
             kind=kind,
             normalized=normalized,
             warnings=(warning,),
+            invalid_fields=invalid_fields,
         )

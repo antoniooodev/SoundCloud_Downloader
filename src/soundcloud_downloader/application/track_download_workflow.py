@@ -93,9 +93,11 @@ class TrackDownloadWorkflowError(SoundcloudDownloaderError):
         *,
         stage: TrackDownloadFailureStage = TrackDownloadFailureStage.UNKNOWN,
         reason: TrackDownloadFailureReason = TrackDownloadFailureReason.UNKNOWN,
+        invalid_fields: tuple[str, ...] = (),
     ) -> None:
         self.stage = stage
         self.reason = reason
+        self.invalid_fields = invalid_fields
         super().__init__(code, message)
 
 
@@ -185,6 +187,7 @@ class TrackDownloadWorkflow:
                     _WORKFLOW_ERROR_MESSAGE,
                     stage=TrackDownloadFailureStage.RESOLVER,
                     reason=TrackDownloadFailureReason.OFFICIAL_RESOLVER_PAYLOAD_INVALID,
+                    invalid_fields=("unknown",),
                 ) from exc
             if resolved_resource.status is not SoundCloudResolveStatus.RESOLVED:
                 raise TrackDownloadWorkflowError(
@@ -192,6 +195,7 @@ class TrackDownloadWorkflow:
                     _WORKFLOW_ERROR_MESSAGE,
                     stage=TrackDownloadFailureStage.RESOLVER,
                     reason=TrackDownloadFailureReason.OFFICIAL_RESOLVER_PAYLOAD_INVALID,
+                    invalid_fields=resolved_resource.invalid_fields or ("unknown",),
                 )
 
             try:

@@ -30,7 +30,10 @@ from soundcloud_downloader.infrastructure.soundcloud.official_resolver import (
     OfficialSoundCloudResolver,
     SoundCloudResolveRequestBuilder,
 )
-from soundcloud_downloader.infrastructure.soundcloud.response_mapper import SoundCloudResponseMapper
+from soundcloud_downloader.infrastructure.soundcloud.response_mapper import (
+    SoundCloudResponseMapper,
+    summarize_soundcloud_payload_shape,
+)
 from soundcloud_downloader.infrastructure.soundcloud.transcoding_endpoint_service import (
     SoundCloudTranscodingEndpointError,
     SoundCloudTranscodingEndpointService,
@@ -57,6 +60,7 @@ __all__ = [
     "SoundCloudResponseMapper",
     "SoundCloudTranscodingEndpointError",
     "SoundCloudTranscodingEndpointService",
+    "summarize_soundcloud_payload_shape",
     "redact_resolved_stream",
     "redact_hls_manifest_request",
     "redact_hls_segment_request",

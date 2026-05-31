@@ -187,7 +187,10 @@ def _exit_official_failure(result: ResolverServiceResult) -> None:
     if result.resolved:
         return
     typer.echo("Official resolver request failed.", err=True)
-    typer.echo(f"reason={_official_failure_reason(result)}", err=True)
+    reason = _official_failure_reason(result)
+    typer.echo(f"reason={reason}", err=True)
+    if reason == "official_resolver_payload_invalid":
+        typer.echo(f"invalid_fields={_official_invalid_fields(result)}", err=True)
     raise typer.Exit(code=1)
 
 
@@ -207,6 +210,12 @@ def _official_failure_reason(result: ResolverServiceResult) -> str:
     if result.resolved_resource is not None and result.resolved_resource.status.value == "error":
         return "official_resolver_payload_invalid"
     return "unknown"
+
+
+def _official_invalid_fields(result: ResolverServiceResult) -> str:
+    if result.resolved_resource is None or not result.resolved_resource.invalid_fields:
+        return "unknown"
+    return ",".join(result.resolved_resource.invalid_fields)
 
 
 @resolver_app.command("inspect")

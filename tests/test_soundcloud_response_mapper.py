@@ -13,7 +13,10 @@ from soundcloud_downloader.domain import (
     SoundCloudTranscodingMimeType,
     SoundCloudTranscodingProtocol,
 )
-from soundcloud_downloader.infrastructure.soundcloud import SoundCloudResponseMapper
+from soundcloud_downloader.infrastructure.soundcloud import (
+    SoundCloudResponseMapper,
+    summarize_soundcloud_payload_shape,
+)
 
 
 def normalized() -> NormalizedResolverInput:
@@ -463,6 +466,84 @@ def test_invalid_transcoding_endpoint_url_rejects_safely() -> None:
 
     assert resource.status is SoundCloudResolveStatus.ERROR
     assert resource.warnings == ("SoundCloud resolver payload was malformed.",)
+    assert resource.invalid_fields == ("media.transcodings.0.url",)
+
+
+def test_mapper_validation_error_exposes_invalid_fields_only() -> None:
+    payload = official_track_payload()
+    raw_url = "https://api.soundcloud.invalid/media/transcoding?access_token=raw-secret"
+    _first_official_transcoding(payload)["url"] = raw_url
+
+    resource = SoundCloudResponseMapper().map_resolved_resource(payload, normalized())
+    dumped = repr(resource) + str(resource.model_dump(mode="json"))
+
+    assert resource.status is SoundCloudResolveStatus.ERROR
+    assert resource.invalid_fields == ("media.transcodings.0.url",)
+    assert raw_url not in dumped
+    assert "raw-secret" not in dumped
+
+
+def test_invalid_fields_do_not_contain_source_url() -> None:
+    payload = official_track_payload()
+    payload["title"] = 123
+
+    resource = SoundCloudResponseMapper().map_resolved_resource(payload, normalized())
+
+    assert resource.invalid_fields == ("title",)
+    assert "https://soundcloud.com/user/track" not in ",".join(resource.invalid_fields)
+
+
+def test_invalid_fields_do_not_contain_transcoding_or_stream_urls() -> None:
+    payload = official_track_payload()
+    raw_url = "https://api.soundcloud.invalid/media/secret-stream-url"
+    _first_official_transcoding(payload)["url"] = raw_url
+    _first_official_transcoding(payload)["format"] = "not-a-mapping"
+
+    resource = SoundCloudResponseMapper().map_resolved_resource(payload, normalized())
+
+    assert resource.invalid_fields == ("media.transcodings.0.format",)
+    assert raw_url not in ",".join(resource.invalid_fields)
+    assert "stream-url" not in ",".join(resource.invalid_fields)
+
+
+def test_invalid_fields_do_not_contain_token_or_client_secret() -> None:
+    payload = official_track_payload()
+    payload["client_secret"] = "raw-client-secret"
+
+    resource = SoundCloudResponseMapper().map_resolved_resource(payload, normalized())
+
+    assert resource.status is SoundCloudResolveStatus.ERROR
+    assert resource.invalid_fields == ("client_secret",)
+    assert "raw-client-secret" not in ",".join(resource.invalid_fields)
+
+
+def test_payload_shape_helper_returns_keys_counts_and_nulls_only() -> None:
+    payload = official_track_payload()
+    payload["artwork_url"] = None
+    payload["publisher_metadata"] = None
+
+    shape = summarize_soundcloud_payload_shape(payload)
+
+    assert shape["kind_present"] is True
+    assert shape["kind_type"] == "str"
+    assert shape["media_present"] is True
+    assert shape["transcodings_count"] == 1
+    assert "media" in shape["top_level_keys"]
+    assert "url" in shape["transcodings_field_keys"]
+    assert "protocol" in shape["transcodings_format_field_keys"]
+    assert "artwork_url" in shape["nullable_field_names"]
+    assert "publisher_metadata" in shape["nullable_field_names"]
+
+
+def test_payload_shape_helper_does_not_return_url_values() -> None:
+    raw_url = "https://api.soundcloud.invalid/media/secret-stream-url"
+    payload = official_track_payload()
+    _first_official_transcoding(payload)["url"] = raw_url
+
+    shape = summarize_soundcloud_payload_shape(payload)
+
+    assert raw_url not in repr(shape)
+    assert "secret-stream-url" not in repr(shape)
 
 
 def test_raw_transcoding_url_does_not_appear_in_mapped_dto_repr() -> None:

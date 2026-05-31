@@ -738,6 +738,40 @@ def test_official_malformed_payloads_exit_nonzero_safely(
     assert "reason=official_resolver_payload_invalid" in output
 
 
+def test_official_malformed_payload_prints_invalid_fields_safely(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    env_file, _token_store_path, _key = prepared_env(tmp_path)
+    payload = official_track_payload()
+    media = payload["media"]
+    assert isinstance(media, dict)
+    transcodings = media["transcodings"]
+    assert isinstance(transcodings, list)
+    first = transcodings[0]
+    assert isinstance(first, dict)
+    raw_url = "https://api.soundcloud.test/media/secret-url?access_token=raw-token"
+    first["url"] = raw_url
+    transport = MockSoundCloudTransport(resolve_payload=payload)
+    patch_http_client(monkeypatch, transport)
+
+    exit_code, output = invoke_resolver(
+        "https://soundcloud.com/user/track",
+        "--official",
+        "--env-file",
+        str(env_file),
+    )
+
+    assert exit_code != 0
+    assert "Official resolver request failed." in output
+    assert "reason=official_resolver_payload_invalid" in output
+    assert "invalid_fields=media.transcodings.0.url" in output
+    assert raw_url not in output
+    assert "raw-token" not in output
+    assert RAW_ACCESS not in output
+    assert CLIENT_SECRET not in output
+
+
 def test_official_output_does_not_expose_secrets_or_stream_urls(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

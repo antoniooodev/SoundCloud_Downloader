@@ -159,6 +159,8 @@ def download_track(
         typer.echo(_GENERIC_FAILURE_MESSAGE, err=True)
         typer.echo(f"stage={exc.stage.value}", err=True)
         typer.echo(f"reason={exc.reason.value}", err=True)
+        if exc.invalid_fields:
+            typer.echo(f"invalid_fields={_format_invalid_fields(exc.invalid_fields)}", err=True)
         raise typer.Exit(code=1) from None
     except SoundcloudDownloaderError:
         typer.echo(_GENERIC_FAILURE_MESSAGE, err=True)
@@ -334,3 +336,7 @@ def _echo_plain(payload: dict[str, object]) -> None:
     typer.echo(f"checksum={output.get('checksum', '') or ''}")
     segment_count = segments.get("count")
     typer.echo(f"segment_count={'' if segment_count is None else segment_count}")
+
+
+def _format_invalid_fields(invalid_fields: tuple[str, ...]) -> str:
+    return ",".join(invalid_fields or ("unknown",))

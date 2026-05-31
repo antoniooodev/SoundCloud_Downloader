@@ -105,6 +105,19 @@ class SoundCloudResolvedResource(BaseModel):
     playlist: SoundCloudPlaylistSummary | None = None
     user: SoundCloudUserSummary | None = None
     warnings: tuple[str, ...] = ()
+    invalid_fields: tuple[str, ...] = ()
+
+    @field_validator("invalid_fields")
+    @classmethod
+    def validate_invalid_fields(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if not value:
+            return value
+        for item in value:
+            if item == "":
+                raise ValueError("Invalid resolver field paths must not be empty.")
+            if any(char not in "abcdefghijklmnopqrstuvwxyz0123456789_." for char in item):
+                raise ValueError("Invalid resolver field paths must be symbolic.")
+        return value
 
     @model_validator(mode="after")
     def validate_resolved_payload(self) -> Self:

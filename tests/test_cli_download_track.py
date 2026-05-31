@@ -605,6 +605,7 @@ def test_workflow_failure_prints_safe_stage_and_reason(
                 "Track download workflow failed.",
                 stage=TrackDownloadFailureStage.RESOLVER,
                 reason=TrackDownloadFailureReason.OFFICIAL_RESOLVER_PAYLOAD_INVALID,
+                invalid_fields=("media.transcodings.0.url",),
             )
         ),
     )
@@ -615,6 +616,42 @@ def test_workflow_failure_prints_safe_stage_and_reason(
     assert "Track download failed." in output
     assert "stage=resolver" in output
     assert "reason=official_resolver_payload_invalid" in output
+    assert "invalid_fields=media.transcodings.0.url" in output
+
+
+def test_workflow_failure_invalid_fields_do_not_leak_sensitive_values(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    env_file = base_env_file(tmp_path)
+    install_fake_workflow(
+        monkeypatch,
+        FakeWorkflow(
+            error=TrackDownloadWorkflowError(
+                ErrorCode.UNKNOWN_UNSAFE,
+                "Track download workflow failed.",
+                stage=TrackDownloadFailureStage.RESOLVER,
+                reason=TrackDownloadFailureReason.OFFICIAL_RESOLVER_PAYLOAD_INVALID,
+                invalid_fields=("media.transcodings.0.url", "user.username"),
+            )
+        ),
+    )
+
+    exit_code, output = invoke_download(TRACK_URL, "--env-file", str(env_file))
+
+    assert exit_code != 0
+    assert "stage=resolver" in output
+    assert "reason=official_resolver_payload_invalid" in output
+    assert "invalid_fields=media.transcodings.0.url,user.username" in output
+    for forbidden in (
+        TRACK_URL,
+        RAW_TRANSCODING_URL,
+        RAW_MANIFEST_URL,
+        RAW_SEGMENT_URL,
+        RAW_ACCESS,
+        CLIENT_SECRET,
+    ):
+        assert forbidden not in output
 
 
 def test_unexpected_error_exits_nonzero_safely(
