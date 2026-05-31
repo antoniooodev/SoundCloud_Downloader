@@ -1,5 +1,6 @@
 import json
 from typing import Any
+from urllib.parse import parse_qsl, urlsplit
 
 from pydantic import SecretStr, ValidationError
 
@@ -77,6 +78,11 @@ class SoundCloudTranscodingEndpointService:
                 ErrorCode.UNKNOWN_UNSAFE,
                 "SoundCloud transcoding endpoint response was malformed.",
             )
+        if _has_sensitive_url_material(raw_url):
+            raise SoundCloudTranscodingEndpointError(
+                ErrorCode.UNKNOWN_UNSAFE,
+                "SoundCloud transcoding endpoint response was malformed.",
+            )
 
         try:
             stream_url = SoundCloudResolvedStreamUrl(value=SecretStr(raw_url))
@@ -116,3 +122,25 @@ def redact_resolved_stream(stream: SoundCloudResolvedStream) -> dict[str, object
         "snipped": stream.snipped,
         "url": REDACTED_VALUE,
     }
+
+
+_FORBIDDEN_STREAM_URL_KEYS = frozenset(
+    {
+        "access_token",
+        "authorization",
+        "client_secret",
+        "cookie",
+        "refresh_token",
+        "set-cookie",
+    }
+)
+
+
+def _has_sensitive_url_material(raw_url: str) -> bool:
+    lowered_url = raw_url.lower()
+    if any(forbidden_key in lowered_url for forbidden_key in _FORBIDDEN_STREAM_URL_KEYS):
+        return True
+    query_keys = {
+        key.lower() for key, _value in parse_qsl(urlsplit(raw_url).query, keep_blank_values=True)
+    }
+    return bool(query_keys & _FORBIDDEN_STREAM_URL_KEYS)

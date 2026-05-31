@@ -42,6 +42,7 @@ from soundcloud_downloader.infrastructure.soundcloud import (
     HLSSegmentFetcher,
     OAuthRefreshTokenService,
     OfficialSoundCloudResolver,
+    OfficialStreamsClient,
     SoundCloudHLSManifestService,
     SoundCloudTranscodingEndpointService,
 )
@@ -227,6 +228,7 @@ def build_track_download_workflow(
         token_provider=token_provider,
     )
     transcoding_endpoint_service = SoundCloudTranscodingEndpointService(http_client=http_client)
+    official_streams_client = OfficialStreamsClient(settings=settings, http_client=http_client)
     manifest_service = SoundCloudHLSManifestService(http_client=http_client)
     stream_analysis_workflow = ResolvedStreamAnalysisWorkflow(manifest_fetcher=manifest_service)
     storage = LocalArtifactStorage(settings)
@@ -251,6 +253,7 @@ def build_track_download_workflow(
         access_token_provider=token_provider,
         metadata_normalizer=SoundCloudMetadataNormalizer(),
         transcoding_endpoint_resolver=transcoding_endpoint_service,
+        official_streams_resolver=official_streams_client,
         stream_analysis_workflow=stream_analysis_workflow,
         hls_segment_planner=HLSSegmentPlanner(),
         hls_segment_fetcher=segment_fetcher,

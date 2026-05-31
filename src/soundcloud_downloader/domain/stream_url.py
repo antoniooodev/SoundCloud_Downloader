@@ -1,5 +1,5 @@
 from enum import Enum
-from urllib.parse import parse_qsl, urlsplit
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, SecretStr, field_serializer, field_validator
 
@@ -16,18 +16,6 @@ class SoundCloudResolvedStreamKind(str, Enum):
     UNKNOWN = "unknown"
 
 
-_FORBIDDEN_STREAM_URL_KEYS = frozenset(
-    {
-        "access_token",
-        "authorization",
-        "client_secret",
-        "cookie",
-        "refresh_token",
-        "set-cookie",
-    }
-)
-
-
 class SoundCloudResolvedStreamUrl(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -42,12 +30,6 @@ class SoundCloudResolvedStreamUrl(BaseModel):
             raise ValueError("SoundCloud resolved stream URL must be a non-empty absolute URL.")
         if parsed.username is not None or parsed.password is not None:
             raise ValueError("SoundCloud resolved stream URL must not contain userinfo credentials.")
-        lowered_url = raw_url.lower()
-        if any(forbidden_key in lowered_url for forbidden_key in _FORBIDDEN_STREAM_URL_KEYS):
-            raise ValueError("SoundCloud resolved stream URL must not contain sensitive URL material.")
-        query_keys = {key.lower() for key, _value in parse_qsl(parsed.query, keep_blank_values=True)}
-        if query_keys & _FORBIDDEN_STREAM_URL_KEYS:
-            raise ValueError("SoundCloud resolved stream URL must not contain sensitive query keys.")
         return value
 
     @field_serializer("value", when_used="always")

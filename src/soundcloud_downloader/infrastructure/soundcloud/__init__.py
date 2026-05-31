@@ -30,6 +30,11 @@ from soundcloud_downloader.infrastructure.soundcloud.official_resolver import (
     OfficialSoundCloudResolver,
     SoundCloudResolveRequestBuilder,
 )
+from soundcloud_downloader.infrastructure.soundcloud.official_streams import (
+    NoOfficialHLSStreamsError,
+    OfficialStreamsClient,
+    OfficialStreamsEndpointError,
+)
 from soundcloud_downloader.infrastructure.soundcloud.response_mapper import (
     SoundCloudResponseMapper,
     summarize_soundcloud_payload_shape,
@@ -46,6 +51,9 @@ __all__ = [
     "OAuthRefreshTokenError",
     "OAuthRefreshTokenService",
     "OfficialSoundCloudResolver",
+    "OfficialStreamsClient",
+    "OfficialStreamsEndpointError",
+    "NoOfficialHLSStreamsError",
     "SoundCloudAccessToken",
     "SoundCloudApiEndpoint",
     "SoundCloudApiRequest",

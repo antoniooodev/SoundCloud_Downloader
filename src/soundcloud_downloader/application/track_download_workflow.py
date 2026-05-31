@@ -3,6 +3,8 @@ from __future__ import annotations
 from enum import Enum
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
+from pydantic import SecretStr
+
 from soundcloud_downloader.application.hls_segment_planner import (
     HLSSegmentPlanner,
     HLSSegmentPlanningRequest,
@@ -38,6 +40,8 @@ from soundcloud_downloader.domain import (
     SoundCloudResolvedStream,
     SoundCloudResolvedStreamKind,
     SoundCloudTrackMetadata,
+    SoundCloudTranscodingEndpointUrl,
+    SoundCloudTranscodingFormat,
     SoundCloudTranscodingMetadata,
     SoundCloudTranscodingMimeType,
     SoundCloudTranscodingProtocol,
@@ -60,6 +64,8 @@ class TrackDownloadFailureStage(str, Enum):
     METADATA_NORMALIZATION = "metadata_normalization"
     TRANSCODING_SELECTION = "transcoding_selection"
     TRANSCODING_ENDPOINT = "transcoding_endpoint"
+    STREAMS_ENDPOINT = "streams_endpoint"
+    STREAMS_SELECTION = "streams_selection"
     STREAM_ANALYSIS = "stream_analysis"
     SEGMENT_PLANNING = "segment_planning"
     SEGMENT_STAGING = "segment_staging"
@@ -75,6 +81,8 @@ class TrackDownloadFailureReason(str, Enum):
     NO_TRANSCODINGS = "no_transcodings"
     NO_SAFE_HLS_TRANSCODING = "no_safe_hls_transcoding"
     TRANSCODING_ENDPOINT_FAILED = "transcoding_endpoint_failed"
+    STREAMS_ENDPOINT_FAILED = "streams_endpoint_failed"
+    NO_HLS_STREAMS = "no_hls_streams"
     STREAM_ANALYSIS_FAILED = "stream_analysis_failed"
     POLICY_DENIED = "policy_denied"
     SEGMENT_PLANNING_FAILED = "segment_planning_failed"
@@ -107,6 +115,16 @@ class TranscodingEndpointResolverPort(Protocol):
         self,
         *,
         transcoding: SoundCloudTranscodingMetadata,
+        access_token: SoundCloudAccessToken,
+    ) -> SoundCloudResolvedStream: ...
+
+
+@runtime_checkable
+class OfficialStreamsResolverPort(Protocol):
+    async def resolve_hls_stream(
+        self,
+        *,
+        track_urn: str,
         access_token: SoundCloudAccessToken,
     ) -> SoundCloudResolvedStream: ...
 
@@ -160,11 +178,13 @@ class TrackDownloadWorkflow:
         hls_media_assembler: HLSMediaAssemblerPort,
         m4a_remuxer: M4ARemuxerPort,
         audio_exporter: AudioExporterPort,
+        official_streams_resolver: OfficialStreamsResolverPort | None = None,
     ) -> None:
         self._resolver = resolver
         self._access_token_provider = access_token_provider
         self._metadata_normalizer = metadata_normalizer
         self._transcoding_endpoint_resolver = transcoding_endpoint_resolver
+        self._official_streams_resolver = official_streams_resolver
         self._stream_analysis_workflow = stream_analysis_workflow
         self._hls_segment_planner = hls_segment_planner
         self._hls_segment_fetcher = hls_segment_fetcher
@@ -219,44 +239,23 @@ class TrackDownloadWorkflow:
                     reason=TrackDownloadFailureReason.RESOLVED_RESOURCE_NOT_TRACK,
                 )
 
-            try:
-                transcoding = select_transcoding(
-                    tuple(
-                        item
-                        for item in resolved_resource.track.transcodings
-                        if isinstance(item, SoundCloudTranscodingMetadata)
-                    ),
+            transcodings = tuple(
+                item
+                for item in resolved_resource.track.transcodings
+                if isinstance(item, SoundCloudTranscodingMetadata)
+            )
+            access_token = await self._access_token_provider.get_access_token()
+            if transcodings:
+                transcoding, stream = await self._stream_from_transcoding_endpoint(
+                    transcodings,
                     output_format=request.output_format,
-                )
-            except TrackDownloadWorkflowError:
-                raise
-            except Exception as exc:
-                raise TrackDownloadWorkflowError(
-                    ErrorCode.SOURCE_NOT_DOWNLOADABLE,
-                    _NO_HLS_ERROR_MESSAGE,
-                    stage=TrackDownloadFailureStage.TRANSCODING_SELECTION,
-                    reason=TrackDownloadFailureReason.NO_SAFE_HLS_TRANSCODING,
-                ) from exc
-
-            try:
-                access_token = await self._access_token_provider.get_access_token()
-                stream = await self._transcoding_endpoint_resolver.resolve_stream_url(
-                    transcoding=transcoding,
                     access_token=access_token,
                 )
-            except Exception as exc:
-                raise TrackDownloadWorkflowError(
-                    ErrorCode.UNKNOWN_UNSAFE,
-                    _WORKFLOW_ERROR_MESSAGE,
-                    stage=TrackDownloadFailureStage.TRANSCODING_ENDPOINT,
-                    reason=TrackDownloadFailureReason.TRANSCODING_ENDPOINT_FAILED,
-                ) from exc
-            if stream.kind is not SoundCloudResolvedStreamKind.HLS_MANIFEST:
-                raise TrackDownloadWorkflowError(
-                    ErrorCode.SOURCE_NOT_DOWNLOADABLE,
-                    _NO_HLS_ERROR_MESSAGE,
-                    stage=TrackDownloadFailureStage.TRANSCODING_ENDPOINT,
-                    reason=TrackDownloadFailureReason.NO_SAFE_HLS_TRANSCODING,
+            else:
+                transcoding, stream = await self._stream_from_official_streams(
+                    track_urn=resolved_resource.track.soundcloud_urn
+                    or resolved_resource.track.soundcloud_id,
+                    access_token=access_token,
                 )
 
             try:
@@ -349,6 +348,102 @@ class TrackDownloadWorkflow:
                 reason=TrackDownloadFailureReason.UNKNOWN,
             ) from exc
 
+    async def _stream_from_transcoding_endpoint(
+        self,
+        transcodings: tuple[SoundCloudTranscodingMetadata, ...],
+        *,
+        output_format: AudioExportFormat,
+        access_token: SoundCloudAccessToken,
+    ) -> tuple[SoundCloudTranscodingMetadata, SoundCloudResolvedStream]:
+        try:
+            transcoding = select_transcoding(
+                transcodings,
+                output_format=output_format,
+            )
+        except TrackDownloadWorkflowError:
+            raise
+        except Exception as exc:
+            raise TrackDownloadWorkflowError(
+                ErrorCode.SOURCE_NOT_DOWNLOADABLE,
+                _NO_HLS_ERROR_MESSAGE,
+                stage=TrackDownloadFailureStage.TRANSCODING_SELECTION,
+                reason=TrackDownloadFailureReason.NO_SAFE_HLS_TRANSCODING,
+            ) from exc
+
+        try:
+            stream = await self._transcoding_endpoint_resolver.resolve_stream_url(
+                transcoding=transcoding,
+                access_token=access_token,
+            )
+        except Exception as exc:
+            raise TrackDownloadWorkflowError(
+                ErrorCode.UNKNOWN_UNSAFE,
+                _WORKFLOW_ERROR_MESSAGE,
+                stage=TrackDownloadFailureStage.TRANSCODING_ENDPOINT,
+                reason=TrackDownloadFailureReason.TRANSCODING_ENDPOINT_FAILED,
+            ) from exc
+        if stream.kind is not SoundCloudResolvedStreamKind.HLS_MANIFEST:
+            raise TrackDownloadWorkflowError(
+                ErrorCode.SOURCE_NOT_DOWNLOADABLE,
+                _NO_HLS_ERROR_MESSAGE,
+                stage=TrackDownloadFailureStage.TRANSCODING_ENDPOINT,
+                reason=TrackDownloadFailureReason.NO_SAFE_HLS_TRANSCODING,
+            )
+        return transcoding, stream
+
+    async def _stream_from_official_streams(
+        self,
+        *,
+        track_urn: str,
+        access_token: SoundCloudAccessToken,
+    ) -> tuple[SoundCloudTranscodingMetadata, SoundCloudResolvedStream]:
+        if self._official_streams_resolver is None:
+            raise TrackDownloadWorkflowError(
+                ErrorCode.SOURCE_NOT_DOWNLOADABLE,
+                _NO_HLS_ERROR_MESSAGE,
+                stage=TrackDownloadFailureStage.TRANSCODING_SELECTION,
+                reason=TrackDownloadFailureReason.NO_TRANSCODINGS,
+            )
+        try:
+            stream = await self._official_streams_resolver.resolve_hls_stream(
+                track_urn=track_urn,
+                access_token=access_token,
+            )
+        except TrackDownloadWorkflowError:
+            raise
+        except SoundcloudDownloaderError as exc:
+            reason = (
+                TrackDownloadFailureReason.NO_HLS_STREAMS
+                if exc.code is ErrorCode.SOURCE_NOT_DOWNLOADABLE
+                else TrackDownloadFailureReason.STREAMS_ENDPOINT_FAILED
+            )
+            stage = (
+                TrackDownloadFailureStage.STREAMS_SELECTION
+                if reason is TrackDownloadFailureReason.NO_HLS_STREAMS
+                else TrackDownloadFailureStage.STREAMS_ENDPOINT
+            )
+            raise TrackDownloadWorkflowError(
+                exc.code,
+                _WORKFLOW_ERROR_MESSAGE,
+                stage=stage,
+                reason=reason,
+            ) from exc
+        except Exception as exc:
+            raise TrackDownloadWorkflowError(
+                ErrorCode.UNKNOWN_UNSAFE,
+                _WORKFLOW_ERROR_MESSAGE,
+                stage=TrackDownloadFailureStage.STREAMS_ENDPOINT,
+                reason=TrackDownloadFailureReason.STREAMS_ENDPOINT_FAILED,
+            ) from exc
+        if stream.kind is not SoundCloudResolvedStreamKind.HLS_MANIFEST:
+            raise TrackDownloadWorkflowError(
+                ErrorCode.SOURCE_NOT_DOWNLOADABLE,
+                _NO_HLS_ERROR_MESSAGE,
+                stage=TrackDownloadFailureStage.STREAMS_SELECTION,
+                reason=TrackDownloadFailureReason.NO_HLS_STREAMS,
+            )
+        return _transcoding_from_direct_stream(stream), stream
+
     def _final_artifact(
         self,
         *,
@@ -435,6 +530,21 @@ def _transcoding_rank(
     else:
         priority = 2
     return priority, transcoding.preset or "", transcoding.quality or ""
+
+
+def _transcoding_from_direct_stream(stream: SoundCloudResolvedStream) -> SoundCloudTranscodingMetadata:
+    return SoundCloudTranscodingMetadata(
+        preset=stream.preset,
+        quality=stream.quality,
+        snipped=stream.snipped,
+        format=SoundCloudTranscodingFormat(
+            protocol=stream.protocol,
+            mime_type=stream.mime_type,
+        ),
+        endpoint_url=SoundCloudTranscodingEndpointUrl(
+            value=SecretStr(stream.url.get_secret_value())
+        ),
+    )
 
 
 def _output_path(output_format: AudioExportFormat) -> ArtifactRelativePath:

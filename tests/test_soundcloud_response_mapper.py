@@ -247,8 +247,10 @@ def test_mapper_uses_in_memory_payloads_only() -> None:
 
 
 def test_maps_official_like_track_payload() -> None:
+    payload = official_track_payload()
+    payload["urn"] = "soundcloud:tracks:123"
     resource = SoundCloudResponseMapper().map_resolved_resource(
-        official_track_payload(),
+        payload,
         normalized(),
     )
 
@@ -256,6 +258,7 @@ def test_maps_official_like_track_payload() -> None:
     assert resource.kind is SoundCloudResourceKind.TRACK
     assert resource.track is not None
     assert resource.track.soundcloud_id == "123"
+    assert resource.track.soundcloud_urn == "soundcloud:tracks:123"
     assert resource.track.title == "Official track"
     assert resource.track.user is not None
     assert resource.track.user.username == "artist"

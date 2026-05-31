@@ -54,6 +54,7 @@ from soundcloud_downloader.domain import (
     RemuxResult,
     ResolverInputType,
     SourceProtocol,
+    SoundcloudDownloaderError,
     SoundCloudResolvedStream,
     SoundCloudResolvedStreamKind,
     SoundCloudResolvedStreamUrl,
@@ -82,6 +83,10 @@ RAW_REAL_ENDPOINT_URL = (
     "?client_secret=SHOULD_NOT_LEAK"
 )
 RAW_STREAM_URL = "https://media.soundcloud.test/playlist.m3u8?Policy=stream-policy"
+RAW_OFFICIAL_STREAM_URL = (
+    "https://playback.media-streaming.soundcloud.cloud/track/aac_160k/uuid/playlist.m3u8"
+    "?client_secret=SHOULD_NOT_LEAK"
+)
 RAW_PROGRESSIVE_URL = "https://media.soundcloud.test/audio.mp3?Policy=stream-policy"
 RAW_SEGMENT_URL = "https://media.soundcloud.test/segment0.ts?Policy=segment-policy"
 RAW_MANIFEST = f"""#EXTM3U
@@ -141,6 +146,85 @@ def test_workflow_rejects_track_with_no_transcodings() -> None:
     assert "No safe HLS transcoding is available." in str(exc_info.value)
     assert exc_info.value.stage is TrackDownloadFailureStage.TRANSCODING_SELECTION
     assert exc_info.value.reason is TrackDownloadFailureReason.NO_TRANSCODINGS
+
+
+def test_workflow_calls_streams_endpoint_when_resolver_transcodings_are_empty() -> None:
+    workflow = _workflow(
+        resource=_resolved_track(transcodings=(), soundcloud_urn="soundcloud:tracks:123"),
+        official_streams_resolver=FakeOfficialStreamsResolver(),
+    )
+
+    result = run(workflow.download_track(_request()))
+
+    assert result.status is TrackDownloadStatus.SUCCEEDED
+    assert workflow.official_streams_resolver is not None
+    assert workflow.official_streams_resolver.calls == ["soundcloud:tracks:123"]
+    assert workflow.endpoint_resolver.calls == []
+    assert workflow.stream_analysis.calls[0].stream.url.get_secret_value() == RAW_OFFICIAL_STREAM_URL
+
+
+def test_workflow_does_not_call_streams_endpoint_when_hls_transcoding_exists() -> None:
+    streams_resolver = FakeOfficialStreamsResolver()
+    workflow = _workflow(official_streams_resolver=streams_resolver)
+
+    run(workflow.download_track(_request()))
+
+    assert streams_resolver.calls == []
+    assert workflow.endpoint_resolver.calls == [workflow.resolver.resource.track.transcodings[0]]
+
+
+def test_workflow_streams_endpoint_uses_track_urn_when_available() -> None:
+    workflow = _workflow(
+        resource=_resolved_track(transcodings=(), soundcloud_urn="soundcloud:tracks:123"),
+        official_streams_resolver=FakeOfficialStreamsResolver(),
+    )
+
+    run(workflow.download_track(_request()))
+
+    assert workflow.official_streams_resolver is not None
+    assert workflow.official_streams_resolver.calls == ["soundcloud:tracks:123"]
+
+
+def test_workflow_streams_endpoint_falls_back_to_id_when_urn_missing() -> None:
+    workflow = _workflow(
+        resource=_resolved_track(transcodings=(), soundcloud_id="123", soundcloud_urn=None),
+        official_streams_resolver=FakeOfficialStreamsResolver(),
+    )
+
+    run(workflow.download_track(_request()))
+
+    assert workflow.official_streams_resolver is not None
+    assert workflow.official_streams_resolver.calls == ["123"]
+
+
+def test_workflow_streams_endpoint_failure_fails_safely() -> None:
+    workflow = _workflow(
+        resource=_resolved_track(transcodings=()),
+        official_streams_resolver=FakeOfficialStreamsResolver(error=RuntimeError(RAW_OFFICIAL_STREAM_URL)),
+    )
+
+    with pytest.raises(TrackDownloadWorkflowError) as exc_info:
+        run(workflow.download_track(_request()))
+
+    assert exc_info.value.stage is TrackDownloadFailureStage.STREAMS_ENDPOINT
+    assert exc_info.value.reason is TrackDownloadFailureReason.STREAMS_ENDPOINT_FAILED
+    assert RAW_OFFICIAL_STREAM_URL not in str(exc_info.value)
+
+
+def test_workflow_no_official_hls_streams_fails_safely() -> None:
+    workflow = _workflow(
+        resource=_resolved_track(transcodings=()),
+        official_streams_resolver=FakeOfficialStreamsResolver(
+            error=SoundcloudDownloaderError(ErrorCode.SOURCE_NOT_DOWNLOADABLE, RAW_OFFICIAL_STREAM_URL)
+        ),
+    )
+
+    with pytest.raises(TrackDownloadWorkflowError) as exc_info:
+        run(workflow.download_track(_request()))
+
+    assert exc_info.value.stage is TrackDownloadFailureStage.STREAMS_SELECTION
+    assert exc_info.value.reason is TrackDownloadFailureReason.NO_HLS_STREAMS
+    assert RAW_OFFICIAL_STREAM_URL not in str(exc_info.value)
 
 
 def test_workflow_reports_resolver_stage_when_resolver_fails() -> None:
@@ -539,6 +623,7 @@ class WorkflowFixture:
         access_token_provider: "FakeAccessTokenProvider",
         metadata_normalizer: "CountingMetadataNormalizer",
         endpoint_resolver: "FakeEndpointResolver",
+        official_streams_resolver: "FakeOfficialStreamsResolver | None",
         stream_analysis: "FakeStreamAnalysis",
         segment_fetcher: "FakeSegmentFetcher",
         media_assembler: "FakeMediaAssembler",
@@ -550,6 +635,7 @@ class WorkflowFixture:
         self.access_token_provider = access_token_provider
         self.metadata_normalizer = metadata_normalizer
         self.endpoint_resolver = endpoint_resolver
+        self.official_streams_resolver = official_streams_resolver
         self.stream_analysis = stream_analysis
         self.segment_fetcher = segment_fetcher
         self.media_assembler = media_assembler
@@ -607,6 +693,29 @@ class FakeEndpointResolver:
         access_token: SoundCloudAccessToken,
     ) -> SoundCloudResolvedStream:
         self.calls.append(transcoding)
+        if self.error is not None:
+            raise self.error
+        return self.stream
+
+
+class FakeOfficialStreamsResolver:
+    def __init__(
+        self,
+        *,
+        stream: SoundCloudResolvedStream | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        self.stream = stream or _official_stream()
+        self.error = error
+        self.calls: list[str] = []
+
+    async def resolve_hls_stream(
+        self,
+        *,
+        track_urn: str,
+        access_token: SoundCloudAccessToken,
+    ) -> SoundCloudResolvedStream:
+        self.calls.append(track_urn)
         if self.error is not None:
             raise self.error
         return self.stream
@@ -742,6 +851,7 @@ def _workflow(
     resource: SoundCloudResolvedResource | None = None,
     stream: SoundCloudResolvedStream | None = None,
     endpoint_resolver: FakeEndpointResolver | None = None,
+    official_streams_resolver: FakeOfficialStreamsResolver | None = None,
     stream_analysis: FakeStreamAnalysis | None = None,
     segment_planner=None,  # type: ignore[no-untyped-def]
     segment_fetcher: FakeSegmentFetcher | None = None,
@@ -763,6 +873,7 @@ def _workflow(
         access_token_provider=access_token_provider,
         metadata_normalizer=metadata_normalizer,
         transcoding_endpoint_resolver=endpoint_resolver,
+        official_streams_resolver=official_streams_resolver,
         stream_analysis_workflow=stream_analysis,  # type: ignore[arg-type]
         hls_segment_planner=segment_planner or HLSSegmentPlanner(),
         hls_segment_fetcher=segment_fetcher,
@@ -775,6 +886,7 @@ def _workflow(
         access_token_provider=access_token_provider,
         metadata_normalizer=metadata_normalizer,
         endpoint_resolver=endpoint_resolver,
+        official_streams_resolver=official_streams_resolver,
         stream_analysis=stream_analysis,
         segment_fetcher=segment_fetcher,
         media_assembler=media_assembler,
@@ -799,6 +911,8 @@ def _request(
 
 def _resolved_track(
     *,
+    soundcloud_id: str = "track-1",
+    soundcloud_urn: str | None = None,
     transcodings: tuple[SoundCloudTranscodingMetadata, ...] | None = None,
 ) -> SoundCloudResolvedResource:
     return SoundCloudResolvedResource(
@@ -806,7 +920,8 @@ def _resolved_track(
         kind=SoundCloudResourceKind.TRACK,
         normalized=_normalized(),
         track=SoundCloudTrackSummary(
-            soundcloud_id="track-1",
+            soundcloud_id=soundcloud_id,
+            soundcloud_urn=soundcloud_urn,
             title="Example Track",
             duration_ms=123_000,
             permalink_url_redacted=RAW_SOURCE_URL,
@@ -933,6 +1048,18 @@ def _stream(kind: SoundCloudResolvedStreamKind) -> SoundCloudResolvedStream:
         protocol=protocol,
         mime_type=SoundCloudTranscodingMimeType.AUDIO_MP4,
         preset="aac_0_1",
+        quality="sq",
+        snipped=False,
+    )
+
+
+def _official_stream() -> SoundCloudResolvedStream:
+    return SoundCloudResolvedStream(
+        kind=SoundCloudResolvedStreamKind.HLS_MANIFEST,
+        url=SoundCloudResolvedStreamUrl(value=SecretStr(RAW_OFFICIAL_STREAM_URL)),
+        protocol=SoundCloudTranscodingProtocol.HLS,
+        mime_type=SoundCloudTranscodingMimeType.AUDIO_MP4,
+        preset="hls_aac_160",
         quality="sq",
         snipped=False,
     )

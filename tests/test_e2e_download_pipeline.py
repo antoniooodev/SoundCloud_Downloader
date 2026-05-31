@@ -42,6 +42,10 @@ REAL_LIKE_TRANSCODING_URL = (
     "?client_secret=SHOULD_NOT_LEAK"
 )
 STREAM_URL = f"https://{MEDIA_HOST}/manifest.m3u8"
+DIRECT_HLS_STREAM_URL = (
+    "https://playback.media-streaming.soundcloud.cloud/track/aac_160k/uuid/playlist.m3u8"
+    "?client_secret=SHOULD_NOT_LEAK"
+)
 RAW_RESOLVER_STREAM_URL = (
     "https://api.soundcloud.test/tracks/123/stream?client_secret=SHOULD_NOT_LEAK"
 )
@@ -155,6 +159,13 @@ def official_track_payload(
     return payload
 
 
+def official_track_payload_without_media() -> dict[str, object]:
+    payload = official_track_payload()
+    payload["urn"] = "soundcloud:tracks:123"
+    payload.pop("media")
+    return payload
+
+
 def real_like_official_track_payload(transcoding_url: str = TRANSCODING_URL) -> dict[str, object]:
     payload = official_track_payload(transcoding_url)
     payload.update(
@@ -180,6 +191,8 @@ class E2EHttpTransport:
         resolve_payload: dict[str, object] | None = None,
         resolve_redirect_location: str | None = None,
         stream_url: str = STREAM_URL,
+        streams_payload: dict[str, object] | None = None,
+        streams_status: int = 200,
         segment_failure_index: int | None = None,
     ) -> None:
         self.manifest_body = manifest_body if manifest_body is not None else media_manifest(SEGMENT_URLS)
@@ -196,14 +209,20 @@ class E2EHttpTransport:
             "expires_in": 3600,
         }
         self.stream_url = stream_url
+        self.streams_payload = (
+            streams_payload if streams_payload is not None else {"hls_aac_160_url": stream_url}
+        )
+        self.streams_status = streams_status
         self.segment_failure_index = segment_failure_index
         self.resolve_calls = 0
         self.transcoding_calls = 0
+        self.streams_calls = 0
         self.manifest_calls = 0
         self.segment_calls: list[str] = []
         self.refresh_calls = 0
         self.resolve_authorizations: list[str | None] = []
         self.transcoding_authorizations: list[str | None] = []
+        self.streams_authorizations: list[str | None] = []
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -222,12 +241,23 @@ class E2EHttpTransport:
             return httpx.Response(200, json=self.resolve_payload, request=request)
         if path == "/tracks/123":
             return httpx.Response(200, json=self.resolve_payload, request=request)
+        if path in {
+            "/tracks/123/streams",
+            "/tracks/soundcloud:tracks:123/streams",
+            "/tracks/soundcloud%3Atracks%3A123/streams",
+        }:
+            self.streams_calls += 1
+            self.streams_authorizations.append(request.headers.get("authorization"))
+            return httpx.Response(self.streams_status, json=self.streams_payload, request=request)
         full_url = str(request.url)
         if full_url in {TRANSCODING_URL, REAL_LIKE_TRANSCODING_URL}:
             self.transcoding_calls += 1
             self.transcoding_authorizations.append(request.headers.get("authorization"))
             return httpx.Response(200, json={"url": self.stream_url}, request=request)
         if full_url == self.stream_url:
+            self.manifest_calls += 1
+            return httpx.Response(200, text=self.manifest_body, request=request)
+        if full_url == DIRECT_HLS_STREAM_URL:
             self.manifest_calls += 1
             return httpx.Response(200, text=self.manifest_body, request=request)
         if full_url in self.segments:
@@ -558,17 +588,69 @@ def test_e2e_payload_with_stream_url_but_no_transcodings_fails_selection_safely(
     media = payload["media"]
     assert isinstance(media, dict)
     media["transcodings"] = []
-    transport = E2EHttpTransport(resolve_payload=payload)
+    transport = E2EHttpTransport(resolve_payload=payload, streams_payload={})
     install_test_doubles(monkeypatch, transport)
 
     exit_code, output = invoke(*_common_args(env_file))
 
     assert exit_code != 0
     assert "Track download failed." in output
-    assert "stage=transcoding_selection" in output
-    assert "reason=no_transcodings" in output
+    assert "stage=streams_selection" in output
+    assert "reason=no_hls_streams" in output
     assert transport.transcoding_calls == 0
+    assert transport.streams_calls == 1
     assert RAW_RESOLVER_STREAM_URL not in output
+    assert "SHOULD_NOT_LEAK" not in output
+
+
+def test_e2e_resolver_without_media_uses_official_streams_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    block_real_network(monkeypatch)
+    block_real_subprocess(monkeypatch)
+    env_file, _store, _key = prepared_env(tmp_path)
+    transport = E2EHttpTransport(
+        resolve_payload=official_track_payload_without_media(),
+        stream_url=DIRECT_HLS_STREAM_URL,
+        streams_payload={"hls_aac_160_url": DIRECT_HLS_STREAM_URL},
+    )
+    install_test_doubles(monkeypatch, transport)
+
+    exit_code, output = invoke(*_common_args(env_file))
+    payload = json.loads(output)
+
+    assert exit_code == 0, output
+    assert payload["status"] == "succeeded"
+    assert transport.transcoding_calls == 0
+    assert transport.streams_calls == 1
+    assert transport.streams_authorizations == [f"Bearer {RAW_ACCESS}"]
+    assert transport.manifest_calls == 1
+    assert DIRECT_HLS_STREAM_URL not in output
+    assert "SHOULD_NOT_LEAK" not in output
+
+
+def test_e2e_streams_endpoint_http_failure_fails_safely(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    block_real_network(monkeypatch)
+    block_real_subprocess(monkeypatch)
+    env_file, _store, _key = prepared_env(tmp_path)
+    transport = E2EHttpTransport(
+        resolve_payload=official_track_payload_without_media(),
+        streams_payload={"hls_aac_160_url": DIRECT_HLS_STREAM_URL},
+        streams_status=500,
+    )
+    install_test_doubles(monkeypatch, transport)
+
+    exit_code, output = invoke(*_common_args(env_file))
+
+    assert exit_code != 0
+    assert "Track download failed." in output
+    assert "stage=streams_endpoint" in output
+    assert "reason=streams_endpoint_failed" in output
+    assert DIRECT_HLS_STREAM_URL not in output
     assert "SHOULD_NOT_LEAK" not in output
 
 

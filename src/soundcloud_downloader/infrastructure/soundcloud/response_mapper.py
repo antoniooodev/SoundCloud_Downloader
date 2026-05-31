@@ -246,6 +246,7 @@ class SoundCloudResponseMapper:
     def _track(self, payload: Mapping[str, object]) -> SoundCloudTrackSummary:
         return SoundCloudTrackSummary(
             soundcloud_id=self._required_string(payload, "soundcloud_id"),
+            soundcloud_urn=self._optional_string(payload.get("soundcloud_urn"), "soundcloud_urn"),
             title=self._required_string(payload, "title"),
             duration_ms=self._optional_int(payload.get("duration_ms"), "duration_ms"),
             permalink=self._optional_string(payload.get("permalink"), "permalink"),
@@ -310,6 +311,7 @@ class SoundCloudResponseMapper:
     def _official_track(self, payload: Mapping[str, object]) -> SoundCloudTrackSummary:
         return SoundCloudTrackSummary(
             soundcloud_id=self._required_id(payload, "id", "id"),
+            soundcloud_urn=self._optional_string(payload.get("urn"), "urn"),
             title=self._required_string(payload, "title", "title"),
             duration_ms=self._optional_int(payload.get("duration"), "duration"),
             permalink=self._optional_string(payload.get("permalink"), "permalink"),

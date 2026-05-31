@@ -69,6 +69,7 @@ class SoundCloudTrackSummary(_SafeUrlModel):
     model_config = ConfigDict(frozen=True)
 
     soundcloud_id: str
+    soundcloud_urn: str | None = None
     title: str
     duration_ms: int | None = Field(default=None, ge=0)
     permalink: str | None = None

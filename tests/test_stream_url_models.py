@@ -51,12 +51,14 @@ def test_resolved_stream_url_rejects_userinfo_credentials() -> None:
         )
 
 
-@pytest.mark.parametrize("query_key", ["access_token", "refresh_token", "client_secret"])
-def test_resolved_stream_url_rejects_sensitive_query_keys(query_key: str) -> None:
-    with pytest.raises(ValidationError):
-        SoundCloudResolvedStreamUrl(
-            value=SecretStr(f"https://media.soundcloud.test/audio.mp3?{query_key}=raw")
-        )
+def test_resolved_stream_url_accepts_signed_query_but_keeps_it_secret() -> None:
+    raw_url = "https://media.soundcloud.test/audio.mp3?client_secret=raw"
+
+    stream_url = SoundCloudResolvedStreamUrl(value=SecretStr(raw_url))
+
+    assert stream_url.get_secret_value() == raw_url
+    assert raw_url not in repr(stream_url)
+    assert "client_secret" not in str(stream_url.model_dump(mode="json"))
 
 
 def test_resolved_stream_url_repr_does_not_expose_raw_url() -> None:
