@@ -23,6 +23,7 @@ from soundcloud_downloader.infrastructure.soundcloud.api_contract import (
 )
 from soundcloud_downloader.infrastructure.soundcloud.response_mapper import (
     SoundCloudResponseMapper,
+    summarize_soundcloud_payload_shape,
 )
 
 
@@ -70,15 +71,54 @@ class OfficialSoundCloudResolver(SoundCloudResolverPort):
         self,
         normalized: NormalizedResolverInput,
     ) -> SoundCloudResolvedResource:
-        if normalized.normalized_url is None:
+        payload, error = await self._fetch_payload(normalized)
+        if error is not None:
+            return error
+        if payload is None:
             return self._resource(
+                SoundCloudResolveStatus.ERROR,
+                SoundCloudResourceKind.UNKNOWN,
+                normalized,
+                "Official SoundCloud resolve returned a non-object JSON payload.",
+                invalid_fields=("unknown",),
+            )
+        return self._mapper.map_resolved_resource(payload, normalized)
+
+    async def resolve_with_payload_shape(
+        self,
+        normalized: NormalizedResolverInput,
+    ) -> tuple[SoundCloudResolvedResource, dict[str, object]]:
+        payload, error = await self._fetch_payload(normalized)
+        if error is not None:
+            return error, {}
+        if payload is None:
+            return (
+                self._resource(
+                    SoundCloudResolveStatus.ERROR,
+                    SoundCloudResourceKind.UNKNOWN,
+                    normalized,
+                    "Official SoundCloud resolve returned a non-object JSON payload.",
+                    invalid_fields=("unknown",),
+                ),
+                {},
+            )
+        return self._mapper.map_resolved_resource(payload, normalized), (
+            summarize_soundcloud_payload_shape(payload)
+        )
+
+    async def _fetch_payload(
+        self,
+        normalized: NormalizedResolverInput,
+    ) -> tuple[Mapping[str, object] | None, SoundCloudResolvedResource | None]:
+        if normalized.normalized_url is None:
+            return None, self._resource(
                 SoundCloudResolveStatus.UNSUPPORTED,
                 SoundCloudResourceKind.UNKNOWN,
                 normalized,
                 "Official SoundCloud resolve requires a normalized URL.",
             )
         if normalized.resource_type is SoundCloudResourceType.UNKNOWN:
-            return self._resource(
+            return None, self._resource(
                 SoundCloudResolveStatus.UNSUPPORTED,
                 SoundCloudResourceKind.UNKNOWN,
                 normalized,
@@ -99,7 +139,7 @@ class OfficialSoundCloudResolver(SoundCloudResolverPort):
                 )
             )
         except HttpRequestError:
-            return self._resource(
+            return None, self._resource(
                 SoundCloudResolveStatus.ERROR,
                 SoundCloudResourceKind.UNKNOWN,
                 normalized,
@@ -107,28 +147,28 @@ class OfficialSoundCloudResolver(SoundCloudResolverPort):
             )
 
         if response.status_code == 404:
-            return self._resource(
+            return None, self._resource(
                 SoundCloudResolveStatus.NOT_FOUND,
                 SoundCloudResourceKind.UNKNOWN,
                 normalized,
                 "Official SoundCloud resolve resource was not found.",
             )
         if response.status_code in {401, 403}:
-            return self._resource(
+            return None, self._resource(
                 SoundCloudResolveStatus.ERROR,
                 SoundCloudResourceKind.UNKNOWN,
                 normalized,
                 "Official SoundCloud resolve authorization failed.",
             )
         if response.status_code == 429:
-            return self._resource(
+            return None, self._resource(
                 SoundCloudResolveStatus.ERROR,
                 SoundCloudResourceKind.UNKNOWN,
                 normalized,
                 "Official SoundCloud resolve was rate limited.",
             )
         if response.status_code < 200 or response.status_code >= 300:
-            return self._resource(
+            return None, self._resource(
                 SoundCloudResolveStatus.ERROR,
                 SoundCloudResourceKind.UNKNOWN,
                 normalized,
@@ -138,7 +178,7 @@ class OfficialSoundCloudResolver(SoundCloudResolverPort):
         try:
             payload = json.loads(response.text)
         except json.JSONDecodeError:
-            return self._resource(
+            return None, self._resource(
                 SoundCloudResolveStatus.ERROR,
                 SoundCloudResourceKind.UNKNOWN,
                 normalized,
@@ -147,15 +187,9 @@ class OfficialSoundCloudResolver(SoundCloudResolverPort):
             )
 
         if not isinstance(payload, Mapping):
-            return self._resource(
-                SoundCloudResolveStatus.ERROR,
-                SoundCloudResourceKind.UNKNOWN,
-                normalized,
-                "Official SoundCloud resolve returned a non-object JSON payload.",
-                invalid_fields=("unknown",),
-            )
+            return None, None
 
-        return self._mapper.map_resolved_resource(payload, normalized)
+        return payload, None
 
     def _resource(
         self,

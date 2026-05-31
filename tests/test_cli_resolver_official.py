@@ -32,6 +32,10 @@ STREAM_URL = "https://api.soundcloud.test/media/raw-stream-url"
 RAW_RESOLVER_STREAM_URL = (
     "https://api.soundcloud.test/tracks/123/stream?client_secret=SHOULD_NOT_LEAK"
 )
+RAW_TRANSCODING_URL = (
+    "https://api.soundcloud.test/media/track/123/hls?client_secret=SHOULD_NOT_LEAK"
+)
+RAW_PERMALINK_URL = "https://soundcloud.test/artist/track?si=SHOULD_NOT_LEAK"
 
 
 def invoke_resolver(*args: str) -> tuple[int, str]:
@@ -41,6 +45,15 @@ def invoke_resolver(*args: str) -> tuple[int, str]:
 
 def parse_output(output: str) -> dict[str, Any]:
     return json.loads(output)
+
+
+def parse_plain_output(output: str) -> dict[str, str]:
+    parsed = {}
+    for line in output.splitlines():
+        if "=" in line:
+            key, value = line.split("=", 1)
+            parsed[key] = value
+    return parsed
 
 
 def token_store_settings(
@@ -467,6 +480,169 @@ def test_official_mode_resolves_mocked_resources(
     assert result["resolved"] is True
     assert result["resolution_mode"] == "official"
     assert result["resolved_resource"]["kind"] == kind
+
+
+def test_official_shape_mode_prints_raw_and_normalized_transcoding_counts(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    env_file, _token_store_path, _key = prepared_env(tmp_path)
+    payload = official_track_payload()
+    payload["permalink_url"] = RAW_PERMALINK_URL
+    media = payload["media"]
+    assert isinstance(media, dict)
+    transcodings = media["transcodings"]
+    assert isinstance(transcodings, list)
+    first = transcodings[0]
+    assert isinstance(first, dict)
+    first["url"] = RAW_TRANSCODING_URL
+    first["snipped"] = False
+    first["format"] = {"protocol": "hls", "mime_type": "audio/mpeg"}
+    transport = MockSoundCloudTransport(resolve_payload=payload)
+    patch_http_client(monkeypatch, transport)
+
+    exit_code, output = invoke_resolver(
+        "https://soundcloud.com/user/track",
+        "--official",
+        "--shape",
+        "--plain",
+        "--env-file",
+        str(env_file),
+    )
+    result = parse_plain_output(output)
+
+    assert exit_code == 0, output
+    assert result["raw_kind"] == "track"
+    assert result["raw_media_present"] == "true"
+    assert result["raw_transcodings_field_present"] == "true"
+    assert result["raw_transcodings_count"] == "1"
+    assert result["raw_transcoding_0_protocol"] == "hls"
+    assert result["raw_transcoding_0_mime_type"] == "audio/mpeg"
+    assert result["raw_transcoding_0_url_present"] == "true"
+    assert result["raw_transcoding_0_snipped"] == "false"
+    assert result["normalized_kind"] == "track"
+    assert result["normalized_transcodings_count"] == "1"
+
+
+def test_official_shape_mode_does_not_print_raw_url_values(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    env_file, _token_store_path, _key = prepared_env(tmp_path)
+    payload = official_track_payload()
+    payload["stream_url"] = RAW_RESOLVER_STREAM_URL
+    payload["permalink_url"] = RAW_PERMALINK_URL
+    media = payload["media"]
+    assert isinstance(media, dict)
+    transcodings = media["transcodings"]
+    assert isinstance(transcodings, list)
+    first = transcodings[0]
+    assert isinstance(first, dict)
+    first["url"] = RAW_TRANSCODING_URL
+    transport = MockSoundCloudTransport(resolve_payload=payload)
+    patch_http_client(monkeypatch, transport)
+
+    exit_code, output = invoke_resolver(
+        "https://soundcloud.com/user/track",
+        "--official",
+        "--shape",
+        "--plain",
+        "--env-file",
+        str(env_file),
+    )
+
+    assert exit_code == 0, output
+    assert RAW_TRANSCODING_URL not in output
+    assert RAW_RESOLVER_STREAM_URL not in output
+    assert RAW_PERMALINK_URL not in output
+    assert STREAM_URL not in output
+    assert "SHOULD_NOT_LEAK" not in output
+    assert RAW_ACCESS not in output
+    assert CLIENT_SECRET not in output
+
+
+def test_official_shape_mode_handles_missing_media(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    env_file, _token_store_path, _key = prepared_env(tmp_path)
+    payload = official_track_payload()
+    payload.pop("media")
+    transport = MockSoundCloudTransport(resolve_payload=payload)
+    patch_http_client(monkeypatch, transport)
+
+    exit_code, output = invoke_resolver(
+        "https://soundcloud.com/user/track",
+        "--official",
+        "--shape",
+        "--plain",
+        "--env-file",
+        str(env_file),
+    )
+    result = parse_plain_output(output)
+
+    assert exit_code == 0, output
+    assert result["raw_media_present"] == "false"
+    assert result["raw_transcodings_field_present"] == "false"
+    assert result["raw_transcodings_count"] == "unknown"
+    assert result["normalized_transcodings_count"] == "0"
+
+
+def test_official_shape_mode_handles_empty_transcodings(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    env_file, _token_store_path, _key = prepared_env(tmp_path)
+    payload = official_track_payload()
+    payload["media"] = {"transcodings": []}
+    transport = MockSoundCloudTransport(resolve_payload=payload)
+    patch_http_client(monkeypatch, transport)
+
+    exit_code, output = invoke_resolver(
+        "https://soundcloud.com/user/track",
+        "--official",
+        "--shape",
+        "--plain",
+        "--env-file",
+        str(env_file),
+    )
+    result = parse_plain_output(output)
+
+    assert exit_code == 0, output
+    assert result["raw_media_present"] == "true"
+    assert result["raw_transcodings_field_present"] == "true"
+    assert result["raw_transcodings_count"] == "0"
+    assert result["normalized_transcodings_count"] == "0"
+
+
+def test_official_shape_mode_handles_malformed_transcodings_safely(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    env_file, _token_store_path, _key = prepared_env(tmp_path)
+    payload = official_track_payload()
+    payload["media"] = {"transcodings": ["not-a-mapping"]}
+    transport = MockSoundCloudTransport(resolve_payload=payload)
+    patch_http_client(monkeypatch, transport)
+
+    exit_code, output = invoke_resolver(
+        "https://soundcloud.com/user/track",
+        "--official",
+        "--shape",
+        "--plain",
+        "--env-file",
+        str(env_file),
+    )
+    result = parse_plain_output(output)
+
+    assert exit_code != 0
+    assert result["raw_transcodings_count"] == "1"
+    assert result["raw_transcoding_0_protocol"] == "unknown"
+    assert result["raw_transcoding_0_url_present"] == "false"
+    assert "Official resolver request failed." in output
+    assert "reason=official_resolver_payload_invalid" in output
+    assert RAW_ACCESS not in output
+    assert CLIENT_SECRET not in output
 
 
 def test_official_mode_uses_stored_access_token_without_refresh(

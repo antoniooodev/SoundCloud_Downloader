@@ -6,10 +6,12 @@ from typing import Annotated
 import typer
 
 from soundcloud_downloader.application import (
+    ResolverInputNormalizer,
     ResolverService,
     ResolverServiceRequest,
     ResolverServiceResult,
 )
+from soundcloud_downloader.application.ports import SoundCloudResolvedResource
 from soundcloud_downloader.config import AppSettings, load_settings
 from soundcloud_downloader.domain import (
     ErrorCode,
@@ -51,6 +53,20 @@ def build_official_resolver_service(
     *,
     profile_id: OAuthTokenProfileId,
 ) -> ResolverService:
+    resolver_port = build_official_resolver(
+        settings,
+        http_client,
+        profile_id=profile_id,
+    )
+    return ResolverService(resolver_port=resolver_port)
+
+
+def build_official_resolver(
+    settings: AppSettings,
+    http_client: SafeAsyncHttpClient,
+    *,
+    profile_id: OAuthTokenProfileId,
+) -> OfficialSoundCloudResolver:
     client_id, client_secret = _oauth_client_credentials(settings)
     token_store = EncryptedOAuthTokenStore(settings)
     refresh_service = OAuthRefreshTokenService(settings=settings, http_client=http_client)
@@ -66,7 +82,7 @@ def build_official_resolver_service(
         http_client=http_client,
         token_provider=token_provider,
     )
-    return ResolverService(resolver_port=resolver_port)
+    return resolver_port
 
 
 async def inspect_with_external_resolver(
@@ -109,6 +125,26 @@ async def inspect_with_official_resolver(
                 allow_external_resolution=True,
             )
         )
+
+
+async def inspect_official_resolver_shape(
+    value: str,
+    settings: AppSettings,
+    *,
+    profile_id: OAuthTokenProfileId,
+) -> tuple[SoundCloudResolvedResource, dict[str, object]]:
+    quiet_values = settings.model_dump()
+    quiet_values["log_level"] = "error"
+    quiet_settings = AppSettings(**quiet_values)
+    configure_logging(quiet_settings)
+    normalized = ResolverInputNormalizer().normalize(value)
+    async with build_safe_http_client(settings) as http_client:
+        resolver = build_official_resolver(
+            settings,
+            http_client,
+            profile_id=profile_id,
+        )
+        return await resolver.resolve_with_payload_shape(normalized)
 
 
 def _settings_with_overrides(
@@ -181,6 +217,48 @@ def _echo_result(result: ResolverServiceResult, *, resolution_mode: str | None =
     if resolution_mode is not None:
         payload["resolution_mode"] = resolution_mode
     typer.echo(json.dumps(payload, indent=2, sort_keys=True))
+
+
+def _echo_shape(
+    raw_shape: dict[str, object],
+    resolved_resource: SoundCloudResolvedResource,
+) -> None:
+    lines = {
+        "raw_kind": raw_shape.get("kind") or "unknown",
+        "raw_media_present": raw_shape.get("media_present", False),
+        "raw_transcodings_field_present": raw_shape.get("transcodings_field_present", False),
+        "raw_transcodings_count": raw_shape.get("transcodings_count"),
+    }
+    for key, value in lines.items():
+        typer.echo(f"{key}={_shape_value(value)}")
+    for index, transcoding in enumerate(_raw_transcoding_shapes(raw_shape)):
+        typer.echo(f"raw_transcoding_{index}_protocol={_shape_value(transcoding.get('protocol'))}")
+        typer.echo(f"raw_transcoding_{index}_mime_type={_shape_value(transcoding.get('mime_type'))}")
+        typer.echo(f"raw_transcoding_{index}_url_present={_shape_value(transcoding.get('url_present'))}")
+        typer.echo(f"raw_transcoding_{index}_snipped={_shape_value(transcoding.get('snipped'))}")
+    typer.echo(f"normalized_kind={resolved_resource.kind.value}")
+    typer.echo(f"normalized_transcodings_count={_normalized_transcodings_count(resolved_resource)}")
+
+
+def _raw_transcoding_shapes(raw_shape: dict[str, object]) -> tuple[dict[str, object], ...]:
+    transcodings = raw_shape.get("transcodings")
+    if not isinstance(transcodings, tuple):
+        return ()
+    return tuple(item for item in transcodings if isinstance(item, dict))
+
+
+def _shape_value(value: object) -> str:
+    if isinstance(value, bool):
+        return str(value).lower()
+    if value is None:
+        return "unknown"
+    return str(value)
+
+
+def _normalized_transcodings_count(resource: SoundCloudResolvedResource) -> int:
+    if resource.track is None:
+        return 0
+    return len(resource.track.transcodings)
 
 
 def _exit_official_failure(result: ResolverServiceResult) -> None:
@@ -258,6 +336,14 @@ def inspect_resolver_input(
             help="Override settings filesystem write gate for this command.",
         ),
     ] = None,
+    shape: Annotated[
+        bool,
+        typer.Option("--shape", help="Print safe raw-vs-normalized resolver payload shape."),
+    ] = False,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json/--plain", help="Print JSON or safe key/value lines for shape mode."),
+    ] = True,
     resolve_endpoint: Annotated[
         str | None,
         typer.Option("--resolve-endpoint", help="Explicit resolver endpoint override."),
@@ -268,6 +354,9 @@ def inspect_resolver_input(
             "Official resolver mode and external resolver mode are mutually exclusive.",
             err=True,
         )
+        raise typer.Exit(code=1)
+    if not shape and not json_output:
+        typer.echo("Plain resolver output is only available with --shape.", err=True)
         raise typer.Exit(code=1)
 
     if external:
@@ -301,6 +390,26 @@ def inspect_resolver_input(
         )
         _validate_official_settings(settings)
         try:
+            if shape:
+                resolved_resource, raw_shape = asyncio.run(
+                    inspect_official_resolver_shape(
+                        value,
+                        settings,
+                        profile_id=OAuthTokenProfileId(value=profile_id),
+                    )
+                )
+                _echo_shape(raw_shape, resolved_resource)
+                if resolved_resource.status.value != "resolved":
+                    _exit_official_failure(
+                        ResolverServiceResult(
+                            normalized=resolved_resource.normalized,
+                            resolved=False,
+                            requires_network_resolution=True,
+                            resolved_resource=resolved_resource,
+                            warnings=resolved_resource.warnings,
+                        )
+                    )
+                return
             result = asyncio.run(
                 inspect_with_official_resolver(
                     value,

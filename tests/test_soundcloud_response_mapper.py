@@ -602,8 +602,10 @@ def test_payload_shape_helper_returns_keys_counts_and_nulls_only() -> None:
     shape = summarize_soundcloud_payload_shape(payload)
 
     assert shape["kind_present"] is True
+    assert shape["kind"] == "track"
     assert shape["kind_type"] == "str"
     assert shape["media_present"] is True
+    assert shape["transcodings_field_present"] is True
     assert shape["transcodings_count"] == 1
     assert "media" in shape["top_level_keys"]
     assert "url" in shape["transcodings_field_keys"]
@@ -612,15 +614,71 @@ def test_payload_shape_helper_returns_keys_counts_and_nulls_only() -> None:
     assert "publisher_metadata" in shape["nullable_field_names"]
 
 
+def test_payload_shape_helper_reports_transcoding_format_and_presence_only() -> None:
+    payload = official_track_payload()
+
+    shape = summarize_soundcloud_payload_shape(payload)
+    transcodings = shape["transcodings"]
+
+    assert isinstance(transcodings, tuple)
+    assert transcodings[0]["protocol"] == "hls"
+    assert transcodings[0]["mime_type"] == "audio/mpeg"
+    assert transcodings[0]["url_present"] is True
+    assert transcodings[0]["snipped"] is False
+
+
 def test_payload_shape_helper_does_not_return_url_values() -> None:
     raw_url = "https://api.soundcloud.invalid/media/secret-stream-url"
     payload = official_track_payload()
     _first_official_transcoding(payload)["url"] = raw_url
+    payload["stream_url"] = RAW_RESOLVER_STREAM_URL
+    payload["permalink_url"] = "https://soundcloud.test/artist/track?si=SHOULD_NOT_LEAK"
 
     shape = summarize_soundcloud_payload_shape(payload)
 
     assert raw_url not in repr(shape)
     assert "secret-stream-url" not in repr(shape)
+    assert RAW_RESOLVER_STREAM_URL not in repr(shape)
+    assert "https://soundcloud.test/artist/track" not in repr(shape)
+    assert "SHOULD_NOT_LEAK" not in repr(shape)
+
+
+def test_payload_shape_helper_handles_missing_media() -> None:
+    payload = official_track_payload()
+    payload.pop("media")
+
+    shape = summarize_soundcloud_payload_shape(payload)
+
+    assert shape["media_present"] is False
+    assert shape["transcodings_field_present"] is False
+    assert shape["transcodings_count"] is None
+    assert shape["transcodings"] == ()
+
+
+def test_payload_shape_helper_handles_empty_transcodings() -> None:
+    payload = official_track_payload()
+    payload["media"] = {"transcodings": []}
+
+    shape = summarize_soundcloud_payload_shape(payload)
+
+    assert shape["media_present"] is True
+    assert shape["transcodings_field_present"] is True
+    assert shape["transcodings_count"] == 0
+    assert shape["transcodings"] == ()
+
+
+def test_payload_shape_helper_handles_malformed_transcodings_safely() -> None:
+    payload = official_track_payload()
+    payload["media"] = {"transcodings": ["not-a-mapping"]}
+
+    shape = summarize_soundcloud_payload_shape(payload)
+    transcodings = shape["transcodings"]
+
+    assert shape["transcodings_count"] == 1
+    assert isinstance(transcodings, tuple)
+    assert transcodings[0]["protocol"] is None
+    assert transcodings[0]["mime_type"] is None
+    assert transcodings[0]["url_present"] is False
 
 
 def test_raw_transcoding_url_does_not_appear_in_mapped_dto_repr() -> None:

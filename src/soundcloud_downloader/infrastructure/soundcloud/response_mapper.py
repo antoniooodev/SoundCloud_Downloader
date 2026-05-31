@@ -40,6 +40,21 @@ _FORBIDDEN_KEYS = frozenset(
         "license_url",
     }
 )
+_SAFE_SHAPE_SCALARS = frozenset(
+    {
+        "track",
+        "playlist",
+        "user",
+        "profile",
+        "hls",
+        "progressive",
+        "unknown",
+        "audio/mpeg",
+        "audio/mp4",
+        "audio/aac",
+        "application/vnd.apple.mpegurl",
+    }
+)
 
 
 class _PayloadMappingError(ValueError):
@@ -56,26 +71,51 @@ def summarize_soundcloud_payload_shape(payload: Mapping[str, object]) -> dict[st
 
     summary: dict[str, object] = {
         "top_level_keys": tuple(sorted(str(key) for key in payload)),
+        "kind": _safe_scalar(payload.get("kind")),
         "kind_present": "kind" in payload,
         "kind_type": type(payload.get("kind")).__name__ if "kind" in payload else None,
-        "media_present": "media" in payload,
+        "media_present": isinstance(media, Mapping),
+        "transcodings_field_present": isinstance(media, Mapping) and "transcodings" in media,
         "transcodings_count": len(transcodings) if isinstance(transcodings, list | tuple) else None,
         "transcodings_field_keys": (),
         "transcodings_format_field_keys": (),
+        "transcodings": (),
         "nullable_field_names": tuple(sorted(_nullable_field_names(payload))),
     }
     if isinstance(transcodings, list | tuple):
         field_keys: set[str] = set()
         format_keys: set[str] = set()
+        transcoding_shapes: list[dict[str, object]] = []
         for item in transcodings:
             if not isinstance(item, Mapping):
+                transcoding_shapes.append(
+                    {
+                        "protocol": None,
+                        "mime_type": None,
+                        "url_present": False,
+                        "snipped": None,
+                    }
+                )
                 continue
             field_keys.update(str(key) for key in item)
             format_payload = item.get("format")
+            protocol: object = None
+            mime_type: object = None
             if isinstance(format_payload, Mapping):
                 format_keys.update(str(key) for key in format_payload)
+                protocol = _safe_scalar(format_payload.get("protocol"))
+                mime_type = _safe_scalar(format_payload.get("mime_type"))
+            transcoding_shapes.append(
+                {
+                    "protocol": protocol,
+                    "mime_type": mime_type,
+                    "url_present": isinstance(item.get("url"), str) and bool(item.get("url")),
+                    "snipped": item.get("snipped") if isinstance(item.get("snipped"), bool) else None,
+                }
+            )
         summary["transcodings_field_keys"] = tuple(sorted(field_keys))
         summary["transcodings_format_field_keys"] = tuple(sorted(format_keys))
+        summary["transcodings"] = tuple(transcoding_shapes)
     return summary
 
 
@@ -583,6 +623,15 @@ def _safe_invalid_fields(field_paths: tuple[str, ...] | list[str]) -> tuple[str,
 
 def _path_mentions(field_path: str, marker: str) -> bool:
     return marker in field_path.split(".")
+
+
+def _safe_scalar(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().lower()
+    if normalized in _SAFE_SHAPE_SCALARS:
+        return normalized
+    return "unknown"
 
 
 def _nullable_field_names(value: object, *, prefix: tuple[str, ...] = ()) -> set[str]:
