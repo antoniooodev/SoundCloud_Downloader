@@ -14,6 +14,8 @@ from soundcloud_downloader.application import (
     ResolvedStreamAnalysisRequest,
     ResolvedStreamAnalysisResult,
     SoundCloudMetadataNormalizer,
+    TrackDownloadFailureReason,
+    TrackDownloadFailureStage,
     TrackDownloadWorkflow,
     TrackDownloadWorkflowError,
     select_transcoding,
@@ -132,6 +134,18 @@ def test_workflow_rejects_track_with_no_transcodings() -> None:
         run(workflow.download_track(_request()))
 
     assert "No safe HLS transcoding is available." in str(exc_info.value)
+    assert exc_info.value.stage is TrackDownloadFailureStage.TRANSCODING_SELECTION
+    assert exc_info.value.reason is TrackDownloadFailureReason.NO_TRANSCODINGS
+
+
+def test_workflow_reports_resolver_stage_when_resolver_fails() -> None:
+    workflow = _workflow(resource=_unresolved_resource())
+
+    with pytest.raises(TrackDownloadWorkflowError) as exc_info:
+        run(workflow.download_track(_request()))
+
+    assert exc_info.value.stage is TrackDownloadFailureStage.RESOLVER
+    assert exc_info.value.reason is TrackDownloadFailureReason.OFFICIAL_RESOLVER_PAYLOAD_INVALID
 
 
 def test_workflow_selects_non_snipped_hls_transcoding_over_snipped_hls() -> None:
@@ -161,8 +175,11 @@ def test_workflow_fails_closed_when_no_hls_transcoding_exists() -> None:
         mime_type=SoundCloudTranscodingMimeType.AUDIO_MPEG,
     )
 
-    with pytest.raises(TrackDownloadWorkflowError):
+    with pytest.raises(TrackDownloadWorkflowError) as exc_info:
         select_transcoding((progressive,), output_format=AudioExportFormat.MP3)
+
+    assert exc_info.value.stage is TrackDownloadFailureStage.TRANSCODING_SELECTION
+    assert exc_info.value.reason is TrackDownloadFailureReason.NO_SAFE_HLS_TRANSCODING
 
 
 def test_workflow_gets_access_token_through_injected_provider() -> None:
@@ -793,6 +810,15 @@ def _resolved_user() -> SoundCloudResolvedResource:
         kind=SoundCloudResourceKind.USER,
         normalized=_normalized(),
         user=_user_summary(),
+    )
+
+
+def _unresolved_resource() -> SoundCloudResolvedResource:
+    return SoundCloudResolvedResource(
+        status=SoundCloudResolveStatus.ERROR,
+        kind=SoundCloudResourceKind.UNKNOWN,
+        normalized=_normalized(),
+        warnings=("SoundCloud resolver payload was malformed.",),
     )
 
 

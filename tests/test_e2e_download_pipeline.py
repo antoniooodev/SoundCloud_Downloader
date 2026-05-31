@@ -141,6 +141,21 @@ def official_track_payload(transcoding_url: str = TRANSCODING_URL) -> dict[str, 
     }
 
 
+def real_like_official_track_payload(transcoding_url: str = TRANSCODING_URL) -> dict[str, object]:
+    payload = official_track_payload(transcoding_url)
+    payload.update(
+        {
+            "artwork_url": None,
+            "publisher_metadata": None,
+            "policy": "ALLOW",
+            "streamable": True,
+            "extra_field": {"ignored": True},
+        }
+    )
+    payload["user"] = {"id": 99}
+    return payload
+
+
 class E2EHttpTransport:
     def __init__(
         self,
@@ -448,6 +463,28 @@ def test_e2e_pipeline_downloads_after_safe_resolver_redirect(
     assert transport.transcoding_calls == 1
     assert transport.manifest_calls == 1
     assert transport.segment_calls == list(SEGMENT_URLS)
+
+
+def test_e2e_pipeline_continues_after_real_like_resolver_redirect_payload(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    block_real_network(monkeypatch)
+    block_real_subprocess(monkeypatch)
+    env_file, _store, _key = prepared_env(tmp_path)
+    transport = E2EHttpTransport(
+        resolve_payload=real_like_official_track_payload(),
+        resolve_redirect_location="/tracks/123",
+    )
+    install_test_doubles(monkeypatch, transport)
+
+    exit_code, output = invoke(*_common_args(env_file))
+    payload = json.loads(output)
+
+    assert exit_code == 0, output
+    assert payload["status"] == "succeeded"
+    assert transport.resolve_calls == 1
+    assert transport.transcoding_calls == 1
 
 
 def test_e2e_pipeline_uses_transcoding_endpoint(

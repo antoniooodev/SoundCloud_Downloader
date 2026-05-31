@@ -143,6 +143,8 @@ def download_track(
         )
     except ValueError:
         typer.echo(_GENERIC_FAILURE_MESSAGE, err=True)
+        typer.echo("stage=unknown", err=True)
+        typer.echo("reason=unknown", err=True)
         raise typer.Exit(code=1) from None
 
     try:
@@ -153,14 +155,20 @@ def download_track(
                 profile_id=token_profile_id,
             )
         )
-    except TrackDownloadWorkflowError:
+    except TrackDownloadWorkflowError as exc:
         typer.echo(_GENERIC_FAILURE_MESSAGE, err=True)
+        typer.echo(f"stage={exc.stage.value}", err=True)
+        typer.echo(f"reason={exc.reason.value}", err=True)
         raise typer.Exit(code=1) from None
     except SoundcloudDownloaderError:
         typer.echo(_GENERIC_FAILURE_MESSAGE, err=True)
+        typer.echo("stage=unknown", err=True)
+        typer.echo("reason=unknown", err=True)
         raise typer.Exit(code=1) from None
     except Exception:
         typer.echo(_GENERIC_FAILURE_MESSAGE, err=True)
+        typer.echo("stage=unknown", err=True)
+        typer.echo("reason=unknown", err=True)
         raise typer.Exit(code=1) from None
 
     payload = redact_track_download_result(result)

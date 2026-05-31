@@ -246,6 +246,59 @@ def test_maps_official_like_track_payload() -> None:
     assert resource.track.user.username == "artist"
 
 
+def test_maps_real_like_official_track_payload_with_extra_fields() -> None:
+    payload = official_track_payload()
+    payload.update(
+        {
+            "policy": "ALLOW",
+            "publisher_metadata": {"artist": "artist"},
+            "streamable": True,
+            "extra": {"ignored": True},
+        }
+    )
+
+    resource = SoundCloudResponseMapper().map_resolved_resource(payload, normalized())
+
+    assert resource.status is SoundCloudResolveStatus.RESOLVED
+    assert resource.kind is SoundCloudResourceKind.TRACK
+    assert resource.track is not None
+    assert resource.track.soundcloud_id == "123"
+
+
+def test_maps_official_track_with_null_artwork_url() -> None:
+    payload = official_track_payload()
+    payload["artwork_url"] = None
+
+    resource = SoundCloudResponseMapper().map_resolved_resource(payload, normalized())
+
+    assert resource.status is SoundCloudResolveStatus.RESOLVED
+    assert resource.track is not None
+    assert resource.track.artwork_url_redacted is None
+
+
+def test_maps_official_track_with_null_publisher_metadata() -> None:
+    payload = official_track_payload()
+    payload["publisher_metadata"] = None
+
+    resource = SoundCloudResponseMapper().map_resolved_resource(payload, normalized())
+
+    assert resource.status is SoundCloudResolveStatus.RESOLVED
+    assert resource.track is not None
+
+
+def test_maps_official_track_with_partial_nested_user() -> None:
+    payload = official_track_payload()
+    payload["user"] = {"id": 456}
+
+    resource = SoundCloudResponseMapper().map_resolved_resource(payload, normalized())
+
+    assert resource.status is SoundCloudResolveStatus.RESOLVED
+    assert resource.track is not None
+    assert resource.track.user is not None
+    assert resource.track.user.soundcloud_id == "456"
+    assert resource.track.user.username is None
+
+
 def test_track_payload_maps_hls_transcoding_metadata() -> None:
     payload = official_track_payload()
     transcoding_payload = _first_official_transcoding(payload)
@@ -264,6 +317,49 @@ def test_track_payload_maps_hls_transcoding_metadata() -> None:
     assert transcoding.preset == "mp3_1_0"
     assert transcoding.quality == "sq"
     assert transcoding.is_hls is True
+
+
+def test_track_payload_preserves_official_media_transcodings() -> None:
+    payload = official_track_payload()
+    media = payload["media"]
+    assert isinstance(media, dict)
+    media["transcodings"] = [
+        {
+            "url": "https://api.soundcloud.invalid/media/hls",
+            "preset": "aac_0_1",
+            "quality": "sq",
+            "format": {"protocol": "hls", "mime_type": "audio/mp4"},
+        },
+        {
+            "url": "https://api.soundcloud.invalid/media/progressive",
+            "preset": "mp3_1_0",
+            "quality": "sq",
+            "format": {"protocol": "progressive", "mime_type": "audio/mpeg"},
+        },
+    ]
+
+    resource = SoundCloudResponseMapper().map_resolved_resource(payload, normalized())
+
+    assert resource.status is SoundCloudResolveStatus.RESOLVED
+    assert resource.track is not None
+    assert len(resource.track.transcodings) == 2
+
+
+def test_track_payload_maps_hls_transcoding_mime_type() -> None:
+    payload = official_track_payload()
+    transcoding_payload = _first_official_transcoding(payload)
+    format_payload = transcoding_payload["format"]
+    assert isinstance(format_payload, dict)
+    format_payload["protocol"] = "hls"
+    format_payload["mime_type"] = "audio/mp4"
+
+    resource = SoundCloudResponseMapper().map_resolved_resource(payload, normalized())
+
+    assert resource.status is SoundCloudResolveStatus.RESOLVED
+    assert resource.track is not None
+    transcoding = resource.track.transcodings[0]
+    assert isinstance(transcoding, SoundCloudTranscodingMetadata)
+    assert transcoding.format.mime_type is SoundCloudTranscodingMimeType.AUDIO_MP4
 
 
 def test_track_payload_maps_progressive_transcoding_metadata() -> None:

@@ -735,6 +735,7 @@ def test_official_malformed_payloads_exit_nonzero_safely(
 
     assert exit_code != 0
     assert "Official resolver request failed." in output
+    assert "reason=official_resolver_payload_invalid" in output
 
 
 def test_official_output_does_not_expose_secrets_or_stream_urls(

@@ -12,6 +12,8 @@ from soundcloud_downloader.application import (
     PolicyEvaluationResponse,
     ReconstructionPlan,
     ResolvedStreamAnalysisResult,
+    TrackDownloadFailureReason,
+    TrackDownloadFailureStage,
     TrackDownloadWorkflow,
     TrackDownloadWorkflowError,
 )
@@ -557,6 +559,8 @@ def test_workflow_failure_exits_nonzero_safely(
 
     assert exit_code != 0
     assert "Track download failed." in output
+    assert "stage=unknown" in output
+    assert "reason=unknown" in output
     for forbidden in (
         RAW_ACCESS,
         RAW_REFRESH,
@@ -586,6 +590,31 @@ def test_policy_denied_workflow_failure_exits_nonzero_safely(
 
     assert exit_code != 0
     assert "Track download failed." in output
+
+
+def test_workflow_failure_prints_safe_stage_and_reason(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    env_file = base_env_file(tmp_path)
+    install_fake_workflow(
+        monkeypatch,
+        FakeWorkflow(
+            error=TrackDownloadWorkflowError(
+                ErrorCode.UNKNOWN_UNSAFE,
+                "Track download workflow failed.",
+                stage=TrackDownloadFailureStage.RESOLVER,
+                reason=TrackDownloadFailureReason.OFFICIAL_RESOLVER_PAYLOAD_INVALID,
+            )
+        ),
+    )
+
+    exit_code, output = invoke_download(TRACK_URL, "--env-file", str(env_file))
+
+    assert exit_code != 0
+    assert "Track download failed." in output
+    assert "stage=resolver" in output
+    assert "reason=official_resolver_payload_invalid" in output
 
 
 def test_unexpected_error_exits_nonzero_safely(

@@ -63,7 +63,7 @@ class SoundCloudMetadataNormalizer:
             duration_ms=track.duration_ms,
             permalink_url=self._permalink_url(track.permalink_url_redacted),
             artwork_url=self._artwork_url(track.artwork_url_redacted),
-            user=self._user(track.user) if track.user is not None else None,
+            user=self._optional_user(track.user),
             streamable=bool(track.transcodings) if track.transcodings else None,
             downloadable=track.is_downloadable,
             access=self._track_access(track),
@@ -77,7 +77,7 @@ class SoundCloudMetadataNormalizer:
             duration_ms=self._playlist_duration(playlist),
             permalink_url=self._permalink_url(playlist.permalink_url_redacted),
             artwork_url=self._artwork_url(playlist.artwork_url_redacted),
-            user=self._user(playlist.user) if playlist.user is not None else None,
+            user=self._optional_user(playlist.user),
             track_count=playlist.track_count,
             tracks=tuple(self._track(track) for track in playlist.tracks),
         )
@@ -94,6 +94,11 @@ class SoundCloudMetadataNormalizer:
             permalink_url=self._permalink_url(user.permalink_url_redacted),
             avatar_url=self._artwork_url(user.avatar_url_redacted),
         )
+
+    def _optional_user(self, user: SoundCloudUserSummary | None) -> SoundCloudUserMetadata | None:
+        if user is None or user.username is None:
+            return None
+        return self._user(user)
 
     def _permalink_url(self, value: str | None) -> SoundCloudPermalinkUrl | None:
         return SoundCloudPermalinkUrl(value=value) if value is not None else None

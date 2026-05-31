@@ -187,7 +187,26 @@ def _exit_official_failure(result: ResolverServiceResult) -> None:
     if result.resolved:
         return
     typer.echo("Official resolver request failed.", err=True)
+    typer.echo(f"reason={_official_failure_reason(result)}", err=True)
     raise typer.Exit(code=1)
+
+
+def _official_failure_reason(result: ResolverServiceResult) -> str:
+    warnings = " ".join(result.warnings).lower()
+    if any(
+        marker in warnings
+        for marker in (
+            "malformed",
+            "invalid json",
+            "non-object json",
+            "unsupported official resource kind",
+            "forbidden fields",
+        )
+    ):
+        return "official_resolver_payload_invalid"
+    if result.resolved_resource is not None and result.resolved_resource.status.value == "error":
+        return "official_resolver_payload_invalid"
+    return "unknown"
 
 
 @resolver_app.command("inspect")
@@ -285,6 +304,7 @@ def inspect_resolver_input(
             raise typer.Exit(code=1) from None
         except Exception:
             typer.echo("Official resolver request failed.", err=True)
+            typer.echo("reason=unknown", err=True)
             raise typer.Exit(code=1) from None
         _exit_official_failure(result)
         _echo_result(result, resolution_mode="official")

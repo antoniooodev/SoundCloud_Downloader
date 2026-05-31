@@ -343,6 +343,8 @@ class SoundCloudResponseMapper:
 
     def _official_username(self, payload: Mapping[str, object]) -> str | None:
         username = payload.get("username", payload.get("full_name"))
+        if username is None:
+            return None
         if not isinstance(username, str) or not username:
             raise TypeError("username must be a non-empty string")
         return username
