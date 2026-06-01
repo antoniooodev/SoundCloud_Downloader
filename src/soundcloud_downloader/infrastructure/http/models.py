@@ -25,6 +25,8 @@ class HttpRequest(BaseModel):
     timeout_seconds: float | None = Field(default=None, gt=0)
     follow_redirects: bool = False
     max_redirects: int = Field(default=3, ge=0, le=10)
+    redirect_allowed_hosts: tuple[str, ...] = ()
+    allow_sensitive_redirect_query: bool = False
 
     @field_validator("form_data", mode="before")
     @classmethod

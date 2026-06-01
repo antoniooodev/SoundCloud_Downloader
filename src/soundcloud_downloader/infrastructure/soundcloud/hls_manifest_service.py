@@ -18,7 +18,17 @@ _HLS_ACCEPT_HEADER = (
 
 
 class SoundCloudHLSManifestRetrievalError(SoundcloudDownloaderError):
-    pass
+    def __init__(
+        self,
+        code: ErrorCode,
+        message: str,
+        *,
+        hls_analysis_reason: str = "hls_manifest_fetch_failed",
+        manifest_request_status: int | None = None,
+    ) -> None:
+        self.hls_analysis_reason = hls_analysis_reason
+        self.manifest_request_status = manifest_request_status
+        super().__init__(code, message)
 
 
 class SoundCloudHLSManifestService:
@@ -44,6 +54,14 @@ class SoundCloudHLSManifestService:
             method=HttpMethod.GET,
             url=stream.url.get_secret_value(),
             headers={"accept": _HLS_ACCEPT_HEADER},
+            follow_redirects=True,
+            max_redirects=3,
+            redirect_allowed_hosts=(
+                "sndcdn.com",
+                "soundcloud.cloud",
+                "soundcloud.com",
+            ),
+            allow_sensitive_redirect_query=True,
         )
         try:
             response = await self._http_client.request(request)
@@ -51,6 +69,12 @@ class SoundCloudHLSManifestService:
             raise SoundCloudHLSManifestRetrievalError(
                 exc.code,
                 "SoundCloud HLS manifest request failed.",
+                hls_analysis_reason=(
+                    "hls_manifest_redirect_rejected"
+                    if "redirect" in exc.message.lower()
+                    else "hls_manifest_fetch_failed"
+                ),
+                manifest_request_status=exc.status_code,
             ) from exc
 
         if 200 <= response.status_code <= 299:
@@ -60,25 +84,30 @@ class SoundCloudHLSManifestService:
             raise SoundCloudHLSManifestRetrievalError(
                 ErrorCode.AUTH_REQUIRED,
                 "SoundCloud HLS manifest authorization failed.",
+                manifest_request_status=response.status_code,
             )
         if response.status_code == 404:
             raise SoundCloudHLSManifestRetrievalError(
                 ErrorCode.SOURCE_NOT_DOWNLOADABLE,
                 "SoundCloud HLS manifest was not found.",
+                manifest_request_status=response.status_code,
             )
         if response.status_code == 429:
             raise SoundCloudHLSManifestRetrievalError(
                 ErrorCode.NETWORK_RETRYABLE,
                 "SoundCloud HLS manifest request was rate limited.",
+                manifest_request_status=response.status_code,
             )
         if 500 <= response.status_code <= 599:
             raise SoundCloudHLSManifestRetrievalError(
                 ErrorCode.NETWORK_RETRYABLE,
                 "SoundCloud HLS manifest endpoint returned a server error.",
+                manifest_request_status=response.status_code,
             )
         raise SoundCloudHLSManifestRetrievalError(
             ErrorCode.UNKNOWN_UNSAFE,
             "SoundCloud HLS manifest endpoint returned an unsupported response.",
+            manifest_request_status=response.status_code,
         )
 
     def _validated_manifest_text(self, response_text: str) -> str:
@@ -86,11 +115,13 @@ class SoundCloudHLSManifestService:
             raise SoundCloudHLSManifestRetrievalError(
                 ErrorCode.MANIFEST_UNSUPPORTED,
                 "SoundCloud HLS manifest response was empty.",
+                hls_analysis_reason="hls_manifest_parse_failed",
             )
         if "#EXTM3U" not in response_text:
             raise SoundCloudHLSManifestRetrievalError(
                 ErrorCode.MANIFEST_UNSUPPORTED,
                 "SoundCloud HLS manifest response was not a valid HLS manifest.",
+                hls_analysis_reason="hls_manifest_parse_failed",
             )
         return response_text
 

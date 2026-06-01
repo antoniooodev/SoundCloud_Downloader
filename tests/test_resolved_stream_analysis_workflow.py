@@ -8,6 +8,8 @@ import pytest
 from pydantic import SecretStr, ValidationError
 
 from soundcloud_downloader.application import (
+    HLSAnalysisError,
+    HLSAnalysisFailureReason,
     HLSManifestFetcherPort,
     ResolvedStreamAnalysisRequest,
     ResolvedStreamAnalysisResult,
@@ -79,42 +81,40 @@ def test_non_encrypted_hls_manifest_produces_none_drm_status() -> None:
 
 
 def test_encrypted_hls_manifest_produces_encrypted_drm_status() -> None:
-    result = run(
-        _analyze(
-            _stream(SoundCloudResolvedStreamKind.HLS_MANIFEST),
-            FakeManifestFetcher(AES_HLS),
+    with pytest.raises(HLSAnalysisError) as exc_info:
+        run(
+            _analyze(
+                _stream(SoundCloudResolvedStreamKind.HLS_MANIFEST),
+                FakeManifestFetcher(AES_HLS),
+            )
         )
-    )
 
-    assert result.plan.effective_drm_status is DRMStatus.ENCRYPTED_HLS
+    assert exc_info.value.reason is HLSAnalysisFailureReason.HLS_ENCRYPTED_STREAM_UNSUPPORTED
 
 
 def test_sample_aes_fairplay_like_manifest_is_denied_by_policy() -> None:
-    result = run(
-        _analyze(
-            _stream(SoundCloudResolvedStreamKind.HLS_MANIFEST),
-            FakeManifestFetcher(FAIRPLAY_HLS),
+    with pytest.raises(HLSAnalysisError) as exc_info:
+        run(
+            _analyze(
+                _stream(SoundCloudResolvedStreamKind.HLS_MANIFEST),
+                FakeManifestFetcher(FAIRPLAY_HLS),
+            )
         )
-    )
 
-    assert result.plan.effective_drm_status is DRMStatus.EME_DRM
-    assert result.plan.policy.allowed is False
-    assert result.plan.policy.decision is OfflineDecision.DENY_DRM
-    assert result.plan.policy.error_code is ErrorCode.DRM_UNSUPPORTED
+    assert exc_info.value.reason is HLSAnalysisFailureReason.HLS_ENCRYPTED_STREAM_UNSUPPORTED
+    assert exc_info.value.code is ErrorCode.ENCRYPTED_STREAM_UNSUPPORTED
 
 
 def test_manifest_containing_ext_x_key_is_denied_or_marked_encrypted() -> None:
-    result = run(
-        _analyze(
-            _stream(SoundCloudResolvedStreamKind.HLS_MANIFEST),
-            FakeManifestFetcher(AES_HLS),
+    with pytest.raises(HLSAnalysisError) as exc_info:
+        run(
+            _analyze(
+                _stream(SoundCloudResolvedStreamKind.HLS_MANIFEST),
+                FakeManifestFetcher(AES_HLS),
+            )
         )
-    )
 
-    assert result.manifest_analysis is not None
-    assert result.manifest_analysis.has_ext_x_key is True
-    assert result.plan.effective_drm_status is DRMStatus.ENCRYPTED_HLS
-    assert result.plan.policy.allowed is False
+    assert exc_info.value.reason is HLSAnalysisFailureReason.HLS_ENCRYPTED_STREAM_UNSUPPORTED
 
 
 def test_hls_result_contains_manifest_analysis() -> None:
@@ -185,11 +185,12 @@ def test_manifest_fetch_failure_propagates_safely() -> None:
         ),
     )
 
-    with pytest.raises(SoundCloudHLSManifestRetrievalError) as exc_info:
+    with pytest.raises(HLSAnalysisError) as exc_info:
         run(_analyze(_stream(SoundCloudResolvedStreamKind.HLS_MANIFEST), fetcher))
 
     assert RAW_HLS_URL not in str(exc_info.value)
     assert SEGMENT_URL not in str(exc_info.value)
+    assert exc_info.value.reason is HLSAnalysisFailureReason.HLS_MANIFEST_FETCH_FAILED
 
 
 def test_fake_manifest_fetcher_satisfies_port() -> None:

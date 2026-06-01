@@ -42,6 +42,8 @@ REAL_LIKE_TRANSCODING_URL = (
     "?client_secret=SHOULD_NOT_LEAK"
 )
 STREAM_URL = f"https://{MEDIA_HOST}/manifest.m3u8"
+REDIRECT_STREAM_URL = "https://playback.media-streaming.soundcloud.cloud/track/aac_160k/uuid/playlist.m3u8?client_secret=SHOULD_NOT_LEAK"
+REDIRECT_CHILD_STREAM_URL = "https://cf-media.sndcdn.com/variant.m3u8?token=SHOULD_NOT_LEAK"
 DIRECT_HLS_STREAM_URL = (
     "https://playback.media-streaming.soundcloud.cloud/track/aac_160k/uuid/playlist.m3u8"
     "?client_secret=SHOULD_NOT_LEAK"
@@ -54,6 +56,7 @@ SEGMENT_URLS = (
     f"https://{MEDIA_HOST}/segments/seg1.ts",
     f"https://{MEDIA_HOST}/segments/seg2.ts",
 )
+SENSITIVE_SEGMENT_URL = "https://cf-media.sndcdn.com/segment001.ts?token=SHOULD_NOT_LEAK"
 SEGMENT_BYTES = (b"seg-zero-bytes", b"seg-one-bytes", b"seg-two-bytes")
 
 
@@ -186,6 +189,9 @@ class E2EHttpTransport:
         self,
         *,
         manifest_body: str | None = None,
+        manifest_status: int = 200,
+        manifest_redirect_location: str | None = None,
+        extra_manifests: dict[str, str] | None = None,
         segments: dict[str, bytes] | None = None,
         refresh_payload: dict[str, object] | None = None,
         refresh_status: int = 200,
@@ -198,6 +204,9 @@ class E2EHttpTransport:
         segment_failure_index: int | None = None,
     ) -> None:
         self.manifest_body = manifest_body if manifest_body is not None else media_manifest(SEGMENT_URLS)
+        self.manifest_status = manifest_status
+        self.manifest_redirect_location = manifest_redirect_location
+        self.extra_manifests = extra_manifests or {}
         if segments is None:
             segments = {url: SEGMENT_BYTES[index] for index, url in enumerate(SEGMENT_URLS)}
         self.segments = segments
@@ -262,10 +271,19 @@ class E2EHttpTransport:
             return httpx.Response(200, json={"url": self.stream_url}, request=request)
         if full_url == self.stream_url:
             self.manifest_calls += 1
-            return httpx.Response(200, text=self.manifest_body, request=request)
+            if self.manifest_redirect_location is not None:
+                return httpx.Response(
+                    302,
+                    headers={"Location": self.manifest_redirect_location},
+                    request=request,
+                )
+            return httpx.Response(self.manifest_status, text=self.manifest_body, request=request)
         if full_url == DIRECT_HLS_STREAM_URL:
             self.manifest_calls += 1
             return httpx.Response(200, text=self.manifest_body, request=request)
+        if full_url in self.extra_manifests:
+            self.manifest_calls += 1
+            return httpx.Response(200, text=self.extra_manifests[full_url], request=request)
         if full_url in self.segments:
             self.segment_calls.append(full_url)
             index = self.segment_calls.__len__() - 1
@@ -645,6 +663,281 @@ def test_e2e_resolver_without_media_uses_official_streams_endpoint(
     assert transport.streams_authorizations == [f"Bearer {RAW_ACCESS}"]
     assert transport.manifest_calls == 1
     assert DIRECT_HLS_STREAM_URL not in output
+    assert "SHOULD_NOT_LEAK" not in output
+
+
+def test_e2e_streams_fallback_reaches_segment_planning_for_valid_hls(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    block_real_network(monkeypatch)
+    block_real_subprocess(monkeypatch)
+    env_file, _store, _key = prepared_env(tmp_path)
+    transport = E2EHttpTransport(
+        resolve_payload=official_track_payload_without_media(),
+        stream_url=DIRECT_HLS_STREAM_URL,
+        streams_payload={"hls_aac_160_url": DIRECT_HLS_STREAM_URL},
+    )
+    install_test_doubles(monkeypatch, transport)
+
+    exit_code, output = invoke(*_common_args(env_file), "--plain")
+
+    assert exit_code == 0, output
+    assert "segment_count=3" in output
+    assert transport.streams_calls == 1
+    assert transport.segment_calls == list(SEGMENT_URLS)
+    assert DIRECT_HLS_STREAM_URL not in output
+    assert "SHOULD_NOT_LEAK" not in output
+
+
+def test_hls_manifest_http_failure_reports_specific_safe_reason(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    env_file, _store, _key = prepared_env(tmp_path)
+    transport = E2EHttpTransport(manifest_status=403)
+    install_test_doubles(monkeypatch, transport)
+
+    exit_code, output = invoke(*_common_args(env_file))
+
+    assert exit_code != 0
+    assert "stage=stream_analysis" in output
+    assert "reason=hls_manifest_fetch_failed" in output
+    assert STREAM_URL not in output
+    assert "SHOULD_NOT_LEAK" not in output
+
+
+def test_hls_manifest_unsafe_redirect_reports_specific_safe_reason(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    env_file, _store, _key = prepared_env(tmp_path)
+    redirect_url = "https://evil.example.test/playlist.m3u8?token=SHOULD_NOT_LEAK"
+    transport = E2EHttpTransport(manifest_redirect_location=redirect_url)
+    install_test_doubles(monkeypatch, transport)
+
+    exit_code, output = invoke(*_common_args(env_file))
+
+    assert exit_code != 0
+    assert "stage=stream_analysis" in output
+    assert "reason=hls_manifest_redirect_rejected" in output
+    assert redirect_url not in output
+    assert "SHOULD_NOT_LEAK" not in output
+
+
+def test_hls_manifest_safe_redirect_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    env_file, _store, _key = prepared_env(tmp_path)
+    transport = E2EHttpTransport(
+        manifest_redirect_location=REDIRECT_STREAM_URL,
+        extra_manifests={REDIRECT_STREAM_URL: media_manifest(SEGMENT_URLS)},
+    )
+    install_test_doubles(monkeypatch, transport)
+
+    exit_code, output = invoke(*_common_args(env_file))
+
+    assert exit_code == 0, output
+    assert transport.manifest_calls == 2
+    assert REDIRECT_STREAM_URL not in output
+    assert "SHOULD_NOT_LEAK" not in output
+
+
+def test_hls_malformed_manifest_reports_parse_failed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    env_file, _store, _key = prepared_env(tmp_path)
+    manifest = "not an m3u8 body SHOULD_NOT_LEAK"
+    transport = E2EHttpTransport(manifest_body=manifest)
+    install_test_doubles(monkeypatch, transport)
+
+    exit_code, output = invoke(*_common_args(env_file))
+
+    assert exit_code != 0
+    assert "stage=stream_analysis" in output
+    assert "reason=hls_manifest_parse_failed" in output
+    assert manifest not in output
+    assert "SHOULD_NOT_LEAK" not in output
+
+
+def test_hls_master_playlist_without_variants_reports_no_variants(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    env_file, _store, _key = prepared_env(tmp_path)
+    transport = E2EHttpTransport(manifest_body="#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=128000\n")
+    install_test_doubles(monkeypatch, transport)
+
+    exit_code, output = invoke(*_common_args(env_file))
+
+    assert exit_code != 0
+    assert "stage=stream_analysis" in output
+    assert "reason=hls_no_variants" in output
+    assert STREAM_URL not in output
+
+
+def test_hls_media_playlist_without_segments_reports_no_segments(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    env_file, _store, _key = prepared_env(tmp_path)
+    transport = E2EHttpTransport(manifest_body="#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXT-X-ENDLIST\n")
+    install_test_doubles(monkeypatch, transport)
+
+    exit_code, output = invoke(*_common_args(env_file))
+
+    assert exit_code != 0
+    assert "stage=stream_analysis" in output
+    assert "reason=hls_no_segments" in output
+
+
+def test_hls_encrypted_playlist_reports_encrypted_unsupported(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    env_file, _store, _key = prepared_env(tmp_path)
+    transport = E2EHttpTransport(manifest_body=encrypted_media_manifest(SEGMENT_URLS))
+    install_test_doubles(monkeypatch, transport)
+
+    exit_code, output = invoke(*_common_args(env_file))
+
+    assert exit_code != 0
+    assert "stage=stream_analysis" in output
+    assert "reason=hls_encrypted_stream_unsupported" in output
+    assert "license.example.test" not in output
+
+
+def test_hls_media_playlist_with_relative_segments_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    env_file, _store, _key = prepared_env(tmp_path)
+    relative_manifest = """#EXTM3U
+#EXT-X-TARGETDURATION:6
+#EXTINF:6.0,
+segments/seg0.ts
+#EXT-X-ENDLIST
+"""
+    transport = E2EHttpTransport(
+        manifest_body=relative_manifest,
+        segments={f"https://{MEDIA_HOST}/segments/seg0.ts": b"segment"},
+    )
+    install_test_doubles(monkeypatch, transport)
+
+    exit_code, output = invoke(*_common_args(env_file))
+
+    assert exit_code == 0, output
+    assert "segments/seg0.ts" not in output
+
+
+def test_hls_media_playlist_with_absolute_segments_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    env_file, _store, _key = prepared_env(tmp_path)
+    segment_url = f"https://{MEDIA_HOST}/absolute/seg0.ts"
+    transport = E2EHttpTransport(
+        manifest_body=media_manifest((segment_url,)),
+        segments={segment_url: b"segment"},
+    )
+    install_test_doubles(monkeypatch, transport)
+
+    exit_code, output = invoke(*_common_args(env_file))
+
+    assert exit_code == 0, output
+    assert segment_url not in output
+
+
+def test_hls_media_playlist_with_byterange_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    env_file, _store, _key = prepared_env(tmp_path)
+    segment_url = f"https://{MEDIA_HOST}/range/seg0.ts"
+    manifest = f"""#EXTM3U
+#EXT-X-TARGETDURATION:6
+#EXTINF:6.0,
+#EXT-X-BYTERANGE:7@0
+{segment_url}
+#EXT-X-ENDLIST
+"""
+    transport = E2EHttpTransport(
+        manifest_body=manifest,
+        segments={segment_url: b"segment"},
+    )
+    install_test_doubles(monkeypatch, transport)
+
+    exit_code, output = invoke(*_common_args(env_file))
+
+    assert exit_code == 0, output
+    assert segment_url not in output
+
+
+def test_hls_master_playlist_selects_variant_and_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    env_file, _store, _key = prepared_env(tmp_path)
+    master = """#EXTM3U
+#EXT-X-STREAM-INF:BANDWIDTH=64000
+low.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=160000
+high.m3u8
+"""
+    high_url = f"https://{MEDIA_HOST}/high.m3u8"
+    transport = E2EHttpTransport(
+        manifest_body=master,
+        extra_manifests={high_url: media_manifest(SEGMENT_URLS)},
+    )
+    install_test_doubles(monkeypatch, transport)
+
+    exit_code, output = invoke(*_common_args(env_file))
+
+    assert exit_code == 0, output
+    assert transport.manifest_calls == 2
+    assert high_url not in output
+
+
+def test_hls_fmp4_init_map_succeeds_without_url_leak(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    env_file, _store, _key = prepared_env(tmp_path)
+    segment_url = f"https://{MEDIA_HOST}/fragment0.m4s"
+    manifest = f"""#EXTM3U
+#EXT-X-MAP:URI="init.mp4"
+#EXTINF:6.0,
+{segment_url}
+#EXT-X-ENDLIST
+"""
+    transport = E2EHttpTransport(
+        manifest_body=manifest,
+        segments={segment_url: b"segment"},
+    )
+    install_test_doubles(monkeypatch, transport)
+
+    exit_code, output = invoke(*_common_args(env_file))
+
+    assert exit_code != 0
+    assert "stage=stream_analysis" in output
+    assert "reason=hls_fmp4_unsupported" in output
+    assert "init.mp4" not in output
+
+
+def test_hls_signed_segment_url_failure_does_not_leak_url_or_query(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    env_file, _store, _key = prepared_env(tmp_path)
+    transport = E2EHttpTransport(manifest_body=media_manifest((SENSITIVE_SEGMENT_URL,)))
+    install_test_doubles(monkeypatch, transport)
+
+    exit_code, output = invoke(*_common_args(env_file))
+
+    assert exit_code != 0
+    assert SENSITIVE_SEGMENT_URL not in output
     assert "SHOULD_NOT_LEAK" not in output
 
 

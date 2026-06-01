@@ -116,7 +116,12 @@ class SafeAsyncHttpClient:
                         status_code=response.status_code,
                     )
                 location = response.headers.get("location")
-                current_url = _safe_redirect_url(current_url, location)
+                current_url = _safe_redirect_url(
+                    current_url,
+                    location,
+                    allowed_hosts=request.redirect_allowed_hosts,
+                    allow_sensitive_query=request.allow_sensitive_redirect_query,
+                )
                 redirect_count += 1
                 current_params = None
                 if response.status_code == 303:
@@ -217,7 +222,13 @@ class SafeAsyncHttpClient:
         await asyncio.sleep(delay)
 
 
-def _safe_redirect_url(current_url: str, location: str | None) -> str:
+def _safe_redirect_url(
+    current_url: str,
+    location: str | None,
+    *,
+    allowed_hosts: tuple[str, ...] = (),
+    allow_sensitive_query: bool = False,
+) -> str:
     if location is None or location == "":
         raise HttpRequestError(
             ErrorCode.NETWORK_PERMANENT,
@@ -236,15 +247,29 @@ def _safe_redirect_url(current_url: str, location: str | None) -> str:
             ErrorCode.NETWORK_PERMANENT,
             "Unsafe HTTP redirect was rejected.",
         )
-    if parsed.hostname != current.hostname:
+    if parsed.hostname != current.hostname and not _host_is_allowed(
+        parsed.hostname,
+        allowed_hosts,
+    ):
         raise HttpRequestError(
             ErrorCode.NETWORK_PERMANENT,
             "Unsafe HTTP redirect was rejected.",
         )
     query_keys = {key.strip().lower() for key, _value in parse_qsl(parsed.query, keep_blank_values=True)}
-    if query_keys & _SENSITIVE_REDIRECT_QUERY_KEYS:
+    if not allow_sensitive_query and query_keys & _SENSITIVE_REDIRECT_QUERY_KEYS:
         raise HttpRequestError(
             ErrorCode.NETWORK_PERMANENT,
             "Unsafe HTTP redirect was rejected.",
         )
     return target
+
+
+def _host_is_allowed(hostname: str | None, allowed_hosts: tuple[str, ...]) -> bool:
+    if hostname is None:
+        return False
+    normalized = hostname.lower().rstrip(".")
+    for allowed in allowed_hosts:
+        allowed_normalized = allowed.lower().lstrip(".").rstrip(".")
+        if normalized == allowed_normalized or normalized.endswith(f".{allowed_normalized}"):
+            return True
+    return False

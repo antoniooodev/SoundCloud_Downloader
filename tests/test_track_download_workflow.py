@@ -9,6 +9,8 @@ from pydantic import SecretStr, ValidationError
 
 from soundcloud_downloader.application import (
     HLSSegmentPlanner,
+    HLSAnalysisError,
+    HLSAnalysisFailureReason,
     PolicyEvaluationResponse,
     ReconstructionPlan,
     ResolvedStreamAnalysisRequest,
@@ -353,6 +355,96 @@ def test_auth_refresh_persist_failure_is_reported_as_auth_not_resolver() -> None
 
     assert exc_info.value.stage is TrackDownloadFailureStage.AUTH
     assert exc_info.value.reason is TrackDownloadFailureReason.TOKEN_REFRESH_PERSIST_FAILED
+
+
+def test_hls_manifest_fetch_failure_is_reported_with_specific_reason() -> None:
+    workflow = _workflow(
+        stream_analysis=FakeStreamAnalysis(
+            error=HLSAnalysisError(
+                ErrorCode.NETWORK_RETRYABLE,
+                "HLS manifest fetch failed.",
+                reason=HLSAnalysisFailureReason.HLS_MANIFEST_FETCH_FAILED,
+            )
+        )
+    )
+
+    with pytest.raises(TrackDownloadWorkflowError) as exc_info:
+        run(workflow.download_track(_request()))
+
+    assert exc_info.value.stage is TrackDownloadFailureStage.STREAM_ANALYSIS
+    assert exc_info.value.reason is TrackDownloadFailureReason.HLS_MANIFEST_FETCH_FAILED
+
+
+def test_hls_redirect_rejection_is_reported_with_specific_reason() -> None:
+    workflow = _workflow(
+        stream_analysis=FakeStreamAnalysis(
+            error=HLSAnalysisError(
+                ErrorCode.NETWORK_PERMANENT,
+                "HLS manifest redirect was rejected.",
+                reason=HLSAnalysisFailureReason.HLS_MANIFEST_REDIRECT_REJECTED,
+            )
+        )
+    )
+
+    with pytest.raises(TrackDownloadWorkflowError) as exc_info:
+        run(workflow.download_track(_request()))
+
+    assert exc_info.value.stage is TrackDownloadFailureStage.STREAM_ANALYSIS
+    assert exc_info.value.reason is TrackDownloadFailureReason.HLS_MANIFEST_REDIRECT_REJECTED
+
+
+def test_hls_parse_failure_is_reported_with_specific_reason() -> None:
+    workflow = _workflow(
+        stream_analysis=FakeStreamAnalysis(
+            error=HLSAnalysisError(
+                ErrorCode.MANIFEST_UNSUPPORTED,
+                "HLS manifest parse failed.",
+                reason=HLSAnalysisFailureReason.HLS_MANIFEST_PARSE_FAILED,
+            )
+        )
+    )
+
+    with pytest.raises(TrackDownloadWorkflowError) as exc_info:
+        run(workflow.download_track(_request()))
+
+    assert exc_info.value.stage is TrackDownloadFailureStage.STREAM_ANALYSIS
+    assert exc_info.value.reason is TrackDownloadFailureReason.HLS_MANIFEST_PARSE_FAILED
+
+
+def test_hls_no_segments_is_reported_with_specific_reason() -> None:
+    workflow = _workflow(
+        stream_analysis=FakeStreamAnalysis(
+            error=HLSAnalysisError(
+                ErrorCode.MANIFEST_UNSUPPORTED,
+                "HLS media playlist contained no segments.",
+                reason=HLSAnalysisFailureReason.HLS_NO_SEGMENTS,
+            )
+        )
+    )
+
+    with pytest.raises(TrackDownloadWorkflowError) as exc_info:
+        run(workflow.download_track(_request()))
+
+    assert exc_info.value.stage is TrackDownloadFailureStage.STREAM_ANALYSIS
+    assert exc_info.value.reason is TrackDownloadFailureReason.HLS_NO_SEGMENTS
+
+
+def test_hls_encrypted_stream_is_reported_with_specific_reason() -> None:
+    workflow = _workflow(
+        stream_analysis=FakeStreamAnalysis(
+            error=HLSAnalysisError(
+                ErrorCode.ENCRYPTED_STREAM_UNSUPPORTED,
+                "Encrypted HLS streams are unsupported.",
+                reason=HLSAnalysisFailureReason.HLS_ENCRYPTED_STREAM_UNSUPPORTED,
+            )
+        )
+    )
+
+    with pytest.raises(TrackDownloadWorkflowError) as exc_info:
+        run(workflow.download_track(_request()))
+
+    assert exc_info.value.stage is TrackDownloadFailureStage.STREAM_ANALYSIS
+    assert exc_info.value.reason is TrackDownloadFailureReason.HLS_ENCRYPTED_STREAM_UNSUPPORTED
 
 
 def test_workflow_resolves_transcoding_endpoint_through_injected_service() -> None:

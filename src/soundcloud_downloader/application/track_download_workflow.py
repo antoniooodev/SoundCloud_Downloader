@@ -21,6 +21,8 @@ from soundcloud_downloader.application.ports import (
     SoundCloudResolverPort,
 )
 from soundcloud_downloader.application.resolved_stream_analysis_workflow import (
+    HLSAnalysisError,
+    HLSAnalysisFailureReason,
     ResolvedStreamAnalysisRequest,
     ResolvedStreamAnalysisWorkflow,
 )
@@ -90,6 +92,15 @@ class TrackDownloadFailureReason(str, Enum):
     STREAMS_ENDPOINT_FAILED = "streams_endpoint_failed"
     NO_HLS_STREAMS = "no_hls_streams"
     STREAM_ANALYSIS_FAILED = "stream_analysis_failed"
+    HLS_MANIFEST_FETCH_FAILED = "hls_manifest_fetch_failed"
+    HLS_MANIFEST_REDIRECT_REJECTED = "hls_manifest_redirect_rejected"
+    HLS_MANIFEST_PARSE_FAILED = "hls_manifest_parse_failed"
+    HLS_MASTER_PLAYLIST_UNSUPPORTED = "hls_master_playlist_unsupported"
+    HLS_NO_VARIANTS = "hls_no_variants"
+    HLS_NO_SEGMENTS = "hls_no_segments"
+    HLS_ENCRYPTED_STREAM_UNSUPPORTED = "hls_encrypted_stream_unsupported"
+    HLS_UNSUPPORTED_MEDIA_PLAYLIST = "hls_unsupported_media_playlist"
+    HLS_FMP4_UNSUPPORTED = "hls_fmp4_unsupported"
     POLICY_DENIED = "policy_denied"
     SEGMENT_PLANNING_FAILED = "segment_planning_failed"
     SEGMENT_STAGING_FAILED = "segment_staging_failed"
@@ -277,6 +288,8 @@ class TrackDownloadWorkflow:
                         output_profile=request.output_profile,
                     )
                 )
+            except HLSAnalysisError as exc:
+                raise _hls_workflow_error(exc) from exc
             except Exception as exc:
                 raise TrackDownloadWorkflowError(
                     ErrorCode.UNKNOWN_UNSAFE,
@@ -302,7 +315,7 @@ class TrackDownloadWorkflow:
             try:
                 segment_plan = self._hls_segment_planner.build_plan(
                     HLSSegmentPlanningRequest(
-                        manifest_url=stream.url,
+                        manifest_url=stream_analysis.stream.url,
                         manifest_text=stream_analysis.manifest_text,
                     )
                 )
@@ -583,3 +596,41 @@ def _auth_failure_reason(
     if reason is AccessTokenProviderFailureReason.TOKEN_REFRESH_PERSIST_FAILED:
         return TrackDownloadFailureReason.TOKEN_REFRESH_PERSIST_FAILED
     return TrackDownloadFailureReason.TOKEN_REFRESH_FAILED
+
+
+def _hls_workflow_error(exc: HLSAnalysisError) -> TrackDownloadWorkflowError:
+    return TrackDownloadWorkflowError(
+        exc.code,
+        _WORKFLOW_ERROR_MESSAGE,
+        stage=TrackDownloadFailureStage.STREAM_ANALYSIS,
+        reason=_hls_failure_reason(exc.reason),
+    )
+
+
+def _hls_failure_reason(reason: HLSAnalysisFailureReason) -> TrackDownloadFailureReason:
+    reason_map = {
+        HLSAnalysisFailureReason.HLS_MANIFEST_FETCH_FAILED: (
+            TrackDownloadFailureReason.HLS_MANIFEST_FETCH_FAILED
+        ),
+        HLSAnalysisFailureReason.HLS_MANIFEST_REDIRECT_REJECTED: (
+            TrackDownloadFailureReason.HLS_MANIFEST_REDIRECT_REJECTED
+        ),
+        HLSAnalysisFailureReason.HLS_MANIFEST_PARSE_FAILED: (
+            TrackDownloadFailureReason.HLS_MANIFEST_PARSE_FAILED
+        ),
+        HLSAnalysisFailureReason.HLS_MASTER_PLAYLIST_UNSUPPORTED: (
+            TrackDownloadFailureReason.HLS_MASTER_PLAYLIST_UNSUPPORTED
+        ),
+        HLSAnalysisFailureReason.HLS_NO_VARIANTS: TrackDownloadFailureReason.HLS_NO_VARIANTS,
+        HLSAnalysisFailureReason.HLS_NO_SEGMENTS: TrackDownloadFailureReason.HLS_NO_SEGMENTS,
+        HLSAnalysisFailureReason.HLS_ENCRYPTED_STREAM_UNSUPPORTED: (
+            TrackDownloadFailureReason.HLS_ENCRYPTED_STREAM_UNSUPPORTED
+        ),
+        HLSAnalysisFailureReason.HLS_UNSUPPORTED_MEDIA_PLAYLIST: (
+            TrackDownloadFailureReason.HLS_UNSUPPORTED_MEDIA_PLAYLIST
+        ),
+        HLSAnalysisFailureReason.HLS_FMP4_UNSUPPORTED: (
+            TrackDownloadFailureReason.HLS_FMP4_UNSUPPORTED
+        ),
+    }
+    return reason_map[reason]
