@@ -12,6 +12,7 @@ from soundcloud_downloader.application import (
     PolicyEvaluationResponse,
     ReconstructionPlan,
     ResolvedStreamAnalysisResult,
+    HLSManifestFetchFailureKind,
     TrackDownloadFailureReason,
     TrackDownloadFailureStage,
     TrackDownloadWorkflow,
@@ -617,6 +618,64 @@ def test_workflow_failure_prints_safe_stage_and_reason(
     assert "stage=resolver" in output
     assert "reason=official_resolver_payload_invalid" in output
     assert "invalid_fields=media.transcodings.0.url" in output
+
+
+def test_workflow_failure_prints_safe_hls_failure_kind_and_status(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    env_file = base_env_file(tmp_path)
+    install_fake_workflow(
+        monkeypatch,
+        FakeWorkflow(
+            error=TrackDownloadWorkflowError(
+                ErrorCode.AUTH_REQUIRED,
+                "Track download workflow failed.",
+                stage=TrackDownloadFailureStage.STREAM_ANALYSIS,
+                reason=TrackDownloadFailureReason.HLS_MANIFEST_FETCH_FAILED,
+                failure_kind=HLSManifestFetchFailureKind.HTTP_STATUS,
+                http_status=403,
+            )
+        ),
+    )
+
+    exit_code, output = invoke_download(TRACK_URL, "--env-file", str(env_file))
+
+    assert exit_code != 0
+    assert "stage=stream_analysis" in output
+    assert "reason=hls_manifest_fetch_failed" in output
+    assert "failure_kind=http_status" in output
+    assert "http_status=403" in output
+
+
+def test_workflow_failure_does_not_print_sensitive_hls_url_details(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    env_file = base_env_file(tmp_path)
+    install_fake_workflow(
+        monkeypatch,
+        FakeWorkflow(
+            error=TrackDownloadWorkflowError(
+                ErrorCode.NETWORK_PERMANENT,
+                f"failed for {RAW_MANIFEST_URL}?token=SHOULD_NOT_LEAK",
+                stage=TrackDownloadFailureStage.STREAM_ANALYSIS,
+                reason=TrackDownloadFailureReason.HLS_MANIFEST_FETCH_FAILED,
+                failure_kind=HLSManifestFetchFailureKind.REDIRECT_REJECTED,
+                redirect_count=1,
+                allowed_host=False,
+            )
+        ),
+    )
+
+    exit_code, output = invoke_download(TRACK_URL, "--env-file", str(env_file))
+
+    assert exit_code != 0
+    assert "failure_kind=redirect_rejected" in output
+    assert "redirect_count=1" in output
+    assert "allowed_host=false" in output
+    assert RAW_MANIFEST_URL not in output
+    assert "SHOULD_NOT_LEAK" not in output
 
 
 def test_auth_workflow_failure_prints_auth_stage_and_reason(

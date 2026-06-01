@@ -11,6 +11,7 @@ from soundcloud_downloader.application import (
     HLSSegmentPlanner,
     HLSAnalysisError,
     HLSAnalysisFailureReason,
+    HLSManifestFetchFailureKind,
     PolicyEvaluationResponse,
     ReconstructionPlan,
     ResolvedStreamAnalysisRequest,
@@ -373,6 +374,28 @@ def test_hls_manifest_fetch_failure_is_reported_with_specific_reason() -> None:
 
     assert exc_info.value.stage is TrackDownloadFailureStage.STREAM_ANALYSIS
     assert exc_info.value.reason is TrackDownloadFailureReason.HLS_MANIFEST_FETCH_FAILED
+
+
+def test_hls_manifest_fetch_failure_details_are_propagated_safely() -> None:
+    workflow = _workflow(
+        stream_analysis=FakeStreamAnalysis(
+            error=HLSAnalysisError(
+                ErrorCode.AUTH_REQUIRED,
+                "HLS manifest fetch failed.",
+                reason=HLSAnalysisFailureReason.HLS_MANIFEST_FETCH_FAILED,
+                manifest_fetch_failure_kind=HLSManifestFetchFailureKind.HTTP_STATUS,
+                manifest_request_status=403,
+            )
+        )
+    )
+
+    with pytest.raises(TrackDownloadWorkflowError) as exc_info:
+        run(workflow.download_track(_request()))
+
+    assert exc_info.value.stage is TrackDownloadFailureStage.STREAM_ANALYSIS
+    assert exc_info.value.reason is TrackDownloadFailureReason.HLS_MANIFEST_FETCH_FAILED
+    assert exc_info.value.failure_kind is HLSManifestFetchFailureKind.HTTP_STATUS
+    assert exc_info.value.http_status == 403
 
 
 def test_hls_redirect_rejection_is_reported_with_specific_reason() -> None:

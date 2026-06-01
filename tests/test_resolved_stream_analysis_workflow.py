@@ -10,6 +10,7 @@ from pydantic import SecretStr, ValidationError
 from soundcloud_downloader.application import (
     HLSAnalysisError,
     HLSAnalysisFailureReason,
+    HLSManifestFetchFailureKind,
     HLSManifestFetcherPort,
     ResolvedStreamAnalysisRequest,
     ResolvedStreamAnalysisResult,
@@ -28,6 +29,9 @@ from soundcloud_downloader.domain import (
     SoundCloudTranscodingProtocol,
 )
 from soundcloud_downloader.infrastructure.soundcloud import SoundCloudHLSManifestRetrievalError
+from soundcloud_downloader.infrastructure.soundcloud import (
+    HLSManifestFetchFailureKind as InfrastructureHLSManifestFetchFailureKind,
+)
 
 T = TypeVar("T")
 
@@ -191,6 +195,25 @@ def test_manifest_fetch_failure_propagates_safely() -> None:
     assert RAW_HLS_URL not in str(exc_info.value)
     assert SEGMENT_URL not in str(exc_info.value)
     assert exc_info.value.reason is HLSAnalysisFailureReason.HLS_MANIFEST_FETCH_FAILED
+
+
+def test_manifest_fetch_failure_kind_propagates_safely() -> None:
+    fetcher = FakeManifestFetcher(
+        PLAIN_HLS,
+        error=SoundCloudHLSManifestRetrievalError(
+            ErrorCode.AUTH_REQUIRED,
+            "Manifest fetch failed safely.",
+            manifest_request_status=403,
+            failure_kind=InfrastructureHLSManifestFetchFailureKind.HTTP_STATUS,
+        ),
+    )
+
+    with pytest.raises(HLSAnalysisError) as exc_info:
+        run(_analyze(_stream(SoundCloudResolvedStreamKind.HLS_MANIFEST), fetcher))
+
+    assert exc_info.value.reason is HLSAnalysisFailureReason.HLS_MANIFEST_FETCH_FAILED
+    assert exc_info.value.manifest_fetch_failure_kind is HLSManifestFetchFailureKind.HTTP_STATUS
+    assert exc_info.value.manifest_request_status == 403
 
 
 def test_fake_manifest_fetcher_satisfies_port() -> None:

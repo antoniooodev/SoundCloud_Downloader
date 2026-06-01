@@ -5,6 +5,7 @@ from soundcloud_downloader.infrastructure.soundcloud.api_contract import (
 )
 from soundcloud_downloader.infrastructure.soundcloud.http_resolver import SoundCloudHttpResolver
 from soundcloud_downloader.infrastructure.soundcloud.hls_manifest_service import (
+    HLSManifestFetchFailureKind,
     SoundCloudHLSManifestRetrievalError,
     SoundCloudHLSManifestService,
     redact_hls_manifest_request,
@@ -63,6 +64,7 @@ __all__ = [
     "HLSMediaAssemblyError",
     "HLSSegmentFetcher",
     "HLSSegmentFetchError",
+    "HLSManifestFetchFailureKind",
     "SoundCloudHLSManifestRetrievalError",
     "SoundCloudHLSManifestService",
     "SoundCloudHttpResolver",

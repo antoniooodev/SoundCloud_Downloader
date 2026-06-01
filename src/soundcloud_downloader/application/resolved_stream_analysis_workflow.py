@@ -52,6 +52,17 @@ class HLSAnalysisFailureReason(str, Enum):
     HLS_FMP4_UNSUPPORTED = "hls_fmp4_unsupported"
 
 
+class HLSManifestFetchFailureKind(str, Enum):
+    SAFE_CLIENT_POLICY_DENIED = "safe_client_policy_denied"
+    HOST_NOT_ALLOWED = "host_not_allowed"
+    REDIRECT_REJECTED = "redirect_rejected"
+    HTTP_STATUS = "http_status"
+    TIMEOUT = "timeout"
+    NETWORK_ERROR = "network_error"
+    INVALID_RESPONSE = "invalid_response"
+    UNKNOWN = "unknown"
+
+
 class HLSAnalysisError(SoundcloudDownloaderError):
     def __init__(
         self,
@@ -60,6 +71,9 @@ class HLSAnalysisError(SoundcloudDownloaderError):
         *,
         reason: HLSAnalysisFailureReason,
         manifest_request_status: int | None = None,
+        manifest_fetch_failure_kind: HLSManifestFetchFailureKind | None = None,
+        redirect_count: int | None = None,
+        allowed_host: bool | None = None,
         manifest_kind: str | None = None,
         variant_count: int | None = None,
         segment_count: int | None = None,
@@ -69,6 +83,9 @@ class HLSAnalysisError(SoundcloudDownloaderError):
     ) -> None:
         self.reason = reason
         self.manifest_request_status = manifest_request_status
+        self.manifest_fetch_failure_kind = manifest_fetch_failure_kind
+        self.redirect_count = redirect_count
+        self.allowed_host = allowed_host
         self.manifest_kind = manifest_kind
         self.variant_count = variant_count
         self.segment_count = segment_count
@@ -166,6 +183,9 @@ class ResolvedStreamAnalysisWorkflow:
                 "HLS manifest fetch failed.",
                 reason=_hls_reason_from_exception(exc),
                 manifest_request_status=getattr(exc, "manifest_request_status", None),
+                manifest_fetch_failure_kind=_hls_manifest_fetch_failure_kind_from_exception(exc),
+                redirect_count=getattr(exc, "redirect_count", None),
+                allowed_host=getattr(exc, "allowed_host", None),
             ) from exc
 
     async def _select_media_playlist(
@@ -355,6 +375,16 @@ def _hls_reason_from_exception(exc: Exception) -> HLSAnalysisFailureReason:
         return HLSAnalysisFailureReason(raw_reason)
     except (TypeError, ValueError):
         return HLSAnalysisFailureReason.HLS_MANIFEST_FETCH_FAILED
+
+
+def _hls_manifest_fetch_failure_kind_from_exception(
+    exc: Exception,
+) -> HLSManifestFetchFailureKind | None:
+    raw_failure_kind = getattr(exc, "failure_kind", None)
+    try:
+        return HLSManifestFetchFailureKind(raw_failure_kind)
+    except (TypeError, ValueError):
+        return None
 
 
 class _HLSVariant(BaseModel):

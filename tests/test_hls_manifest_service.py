@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import socket
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TypeVar
 
@@ -20,10 +20,10 @@ from soundcloud_downloader.domain import (
 from soundcloud_downloader.infrastructure.http import (
     HttpMethod,
     HttpRequest,
-    NetworkDisabledError,
     SafeAsyncHttpClient,
 )
 from soundcloud_downloader.infrastructure.soundcloud import (
+    HLSManifestFetchFailureKind,
     SoundCloudHLSManifestRetrievalError,
     SoundCloudHLSManifestService,
     redact_hls_manifest_request,
@@ -41,7 +41,7 @@ PLAIN_MANIFEST = f"""#EXTM3U
 #EXT-X-ENDLIST
 """
 HLS_ACCEPT_HEADER = (
-    "application/vnd.apple.mpegurl, application/x-mpegURL, text/plain;q=0.9, */*;q=0.1"
+    "application/vnd.apple.mpegurl, application/x-mpegURL, audio/mpegurl, */*"
 )
 
 
@@ -49,10 +49,10 @@ def run(coro: Awaitable[T]) -> T:
     return asyncio.run(coro)
 
 
-def test_allow_network_false_propagates_network_disabled_and_transport_is_not_called() -> None:
+def test_allow_network_false_reports_safe_policy_denial_and_transport_is_not_called() -> None:
     captured_requests: list[httpx.Request] = []
 
-    with pytest.raises(NetworkDisabledError):
+    with pytest.raises(SoundCloudHLSManifestRetrievalError) as exc_info:
         run(
             _fetch_with_response(
                 allow_network=False,
@@ -61,6 +61,7 @@ def test_allow_network_false_propagates_network_disabled_and_transport_is_not_ca
         )
 
     assert captured_requests == []
+    assert exc_info.value.failure_kind is HLSManifestFetchFailureKind.SAFE_CLIENT_POLICY_DENIED
 
 
 def test_successful_mocked_manifest_fetch_returns_manifest_text() -> None:
@@ -98,6 +99,7 @@ def test_progressive_stream_is_rejected_safely() -> None:
         run(_fetch_with_response(stream=_stream(SoundCloudResolvedStreamKind.PROGRESSIVE_MEDIA)))
 
     assert RAW_PROGRESSIVE_URL not in str(exc_info.value)
+    assert exc_info.value.failure_kind is HLSManifestFetchFailureKind.SAFE_CLIENT_POLICY_DENIED
 
 
 def test_unknown_stream_is_rejected_safely() -> None:
@@ -105,6 +107,23 @@ def test_unknown_stream_is_rejected_safely() -> None:
         run(_fetch_with_response(stream=_stream(SoundCloudResolvedStreamKind.UNKNOWN)))
 
     assert RAW_MANIFEST_URL not in str(exc_info.value)
+    assert exc_info.value.failure_kind is HLSManifestFetchFailureKind.SAFE_CLIENT_POLICY_DENIED
+
+
+def test_host_not_allowed_reports_safe_failure_kind() -> None:
+    with pytest.raises(SoundCloudHLSManifestRetrievalError) as exc_info:
+        run(
+            _fetch_with_response(
+                stream=_stream(
+                    SoundCloudResolvedStreamKind.HLS_MANIFEST,
+                    raw_url="https://evil.example.test/playlist.m3u8?token=SHOULD_NOT_LEAK",
+                )
+            )
+        )
+
+    assert exc_info.value.failure_kind is HLSManifestFetchFailureKind.HOST_NOT_ALLOWED
+    assert exc_info.value.allowed_host is False
+    assert "SHOULD_NOT_LEAK" not in str(exc_info.value)
 
 
 def test_empty_response_body_raises_retrieval_error() -> None:
@@ -119,8 +138,64 @@ def test_non_hls_body_without_extm3u_raises_retrieval_error() -> None:
 
 @pytest.mark.parametrize("status_code", [400, 401, 403, 404, 429, 500])
 def test_error_status_raises_retrieval_error(status_code: int) -> None:
-    with pytest.raises(SoundCloudHLSManifestRetrievalError):
+    with pytest.raises(SoundCloudHLSManifestRetrievalError) as exc_info:
         run(_fetch_with_response(status_code=status_code))
+
+    assert exc_info.value.failure_kind is HLSManifestFetchFailureKind.HTTP_STATUS
+    assert exc_info.value.manifest_request_status == status_code
+
+
+def test_timeout_reports_safe_failure_kind() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.TimeoutException("timed out SHOULD_NOT_LEAK", request=request)
+
+    with pytest.raises(SoundCloudHLSManifestRetrievalError) as exc_info:
+        run(_fetch_with_handler(handler))
+
+    assert exc_info.value.failure_kind is HLSManifestFetchFailureKind.TIMEOUT
+    assert "SHOULD_NOT_LEAK" not in str(exc_info.value)
+
+
+def test_network_error_reports_safe_failure_kind() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.NetworkError("network failed SHOULD_NOT_LEAK", request=request)
+
+    with pytest.raises(SoundCloudHLSManifestRetrievalError) as exc_info:
+        run(_fetch_with_handler(handler))
+
+    assert exc_info.value.failure_kind is HLSManifestFetchFailureKind.NETWORK_ERROR
+    assert "SHOULD_NOT_LEAK" not in str(exc_info.value)
+
+
+def test_redirect_rejection_reports_safe_failure_kind() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            302,
+            headers={"Location": "ftp://media.soundcloud.test/playlist.m3u8"},
+            request=request,
+        )
+
+    with pytest.raises(SoundCloudHLSManifestRetrievalError) as exc_info:
+        run(_fetch_with_handler(handler))
+
+    assert exc_info.value.failure_kind is HLSManifestFetchFailureKind.REDIRECT_REJECTED
+    assert exc_info.value.redirect_count == 1
+
+
+def test_redirect_host_not_allowed_reports_redirect_rejected() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            302,
+            headers={"Location": "https://evil.example.test/playlist.m3u8?token=SHOULD_NOT_LEAK"},
+            request=request,
+        )
+
+    with pytest.raises(SoundCloudHLSManifestRetrievalError) as exc_info:
+        run(_fetch_with_handler(handler))
+
+    assert exc_info.value.failure_kind is HLSManifestFetchFailureKind.REDIRECT_REJECTED
+    assert exc_info.value.allowed_host is False
+    assert "SHOULD_NOT_LEAK" not in str(exc_info.value)
 
 
 def test_caplog_does_not_contain_raw_manifest_url(caplog: pytest.LogCaptureFixture) -> None:
@@ -223,7 +298,27 @@ async def _fetch_with_response(
         _settings(allow_network=allow_network),
         transport=httpx.MockTransport(handler),
     ) as http_client:
-        return await SoundCloudHLSManifestService(http_client=http_client).fetch_manifest(
+        return await SoundCloudHLSManifestService(
+            http_client=http_client,
+            allowed_media_hosts=("media.soundcloud.test",),
+        ).fetch_manifest(
+            stream=stream or _stream(SoundCloudResolvedStreamKind.HLS_MANIFEST),
+        )
+
+
+async def _fetch_with_handler(
+    handler: Callable[[httpx.Request], httpx.Response],
+    *,
+    stream: SoundCloudResolvedStream | None = None,
+) -> str:
+    async with SafeAsyncHttpClient(
+        _settings(allow_network=True),
+        transport=httpx.MockTransport(handler),
+    ) as http_client:
+        return await SoundCloudHLSManifestService(
+            http_client=http_client,
+            allowed_media_hosts=("media.soundcloud.test",),
+        ).fetch_manifest(
             stream=stream or _stream(SoundCloudResolvedStreamKind.HLS_MANIFEST),
         )
 
@@ -237,8 +332,14 @@ def _settings(*, allow_network: bool) -> AppSettings:
     )
 
 
-def _stream(kind: SoundCloudResolvedStreamKind) -> SoundCloudResolvedStream:
-    url = RAW_PROGRESSIVE_URL if kind is SoundCloudResolvedStreamKind.PROGRESSIVE_MEDIA else RAW_MANIFEST_URL
+def _stream(
+    kind: SoundCloudResolvedStreamKind,
+    *,
+    raw_url: str | None = None,
+) -> SoundCloudResolvedStream:
+    url = raw_url or (
+        RAW_PROGRESSIVE_URL if kind is SoundCloudResolvedStreamKind.PROGRESSIVE_MEDIA else RAW_MANIFEST_URL
+    )
     protocol = (
         SoundCloudTranscodingProtocol.PROGRESSIVE
         if kind is SoundCloudResolvedStreamKind.PROGRESSIVE_MEDIA

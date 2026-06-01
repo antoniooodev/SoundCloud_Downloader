@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from collections.abc import Mapping
+from enum import Enum
 from types import TracebackType
 from urllib.parse import parse_qsl, urljoin, urlparse
 
@@ -24,6 +25,14 @@ _SENSITIVE_REDIRECT_QUERY_KEYS = frozenset(
 _REDACTED_FORM_VALUE = "[REDACTED]"
 
 
+class HttpRequestFailureKind(str, Enum):
+    HOST_NOT_ALLOWED = "host_not_allowed"
+    REDIRECT_REJECTED = "redirect_rejected"
+    TIMEOUT = "timeout"
+    NETWORK_ERROR = "network_error"
+    UNKNOWN = "unknown"
+
+
 class NetworkDisabledError(SoundcloudDownloaderError):
     def __init__(self) -> None:
         super().__init__(
@@ -39,8 +48,14 @@ class HttpRequestError(SoundcloudDownloaderError):
         message: str,
         *,
         status_code: int | None = None,
+        failure_kind: HttpRequestFailureKind = HttpRequestFailureKind.UNKNOWN,
+        redirect_count: int | None = None,
+        allowed_host: bool | None = None,
     ) -> None:
         self.status_code = status_code
+        self.failure_kind = failure_kind
+        self.redirect_count = redirect_count
+        self.allowed_host = allowed_host
         super().__init__(code, message)
 
 
@@ -91,7 +106,7 @@ class SafeAsyncHttpClient:
                     data=current_data,
                     timeout=timeout_seconds,
                 )
-            except (httpx.TimeoutException, httpx.NetworkError) as exc:
+            except httpx.TimeoutException as exc:
                 if attempt >= max_attempts:
                     self._logger.warning(
                         "http_request_failed",
@@ -103,6 +118,24 @@ class SafeAsyncHttpClient:
                     raise HttpRequestError(
                         ErrorCode.NETWORK_RETRYABLE,
                         f"HTTP request failed after {attempt} attempts for {url_redacted}.",
+                        failure_kind=HttpRequestFailureKind.TIMEOUT,
+                    ) from exc
+                await self._schedule_retry(request, url_redacted, attempt, type(exc).__name__)
+                attempt += 1
+                continue
+            except httpx.NetworkError as exc:
+                if attempt >= max_attempts:
+                    self._logger.warning(
+                        "http_request_failed",
+                        url=url_redacted,
+                        method=request.method.value,
+                        attempt=attempt,
+                        error_type=type(exc).__name__,
+                    )
+                    raise HttpRequestError(
+                        ErrorCode.NETWORK_RETRYABLE,
+                        f"HTTP request failed after {attempt} attempts for {url_redacted}.",
+                        failure_kind=HttpRequestFailureKind.NETWORK_ERROR,
                     ) from exc
                 await self._schedule_retry(request, url_redacted, attempt, type(exc).__name__)
                 attempt += 1
@@ -114,14 +147,26 @@ class SafeAsyncHttpClient:
                         ErrorCode.NETWORK_PERMANENT,
                         "HTTP redirect limit exceeded.",
                         status_code=response.status_code,
+                        failure_kind=HttpRequestFailureKind.REDIRECT_REJECTED,
+                        redirect_count=redirect_count,
                     )
                 location = response.headers.get("location")
-                current_url = _safe_redirect_url(
-                    current_url,
-                    location,
-                    allowed_hosts=request.redirect_allowed_hosts,
-                    allow_sensitive_query=request.allow_sensitive_redirect_query,
-                )
+                try:
+                    current_url = _safe_redirect_url(
+                        current_url,
+                        location,
+                        allowed_hosts=request.redirect_allowed_hosts,
+                        allow_sensitive_query=request.allow_sensitive_redirect_query,
+                    )
+                except HttpRequestError as exc:
+                    raise HttpRequestError(
+                        exc.code,
+                        exc.message,
+                        status_code=response.status_code,
+                        failure_kind=exc.failure_kind,
+                        redirect_count=redirect_count + 1,
+                        allowed_host=exc.allowed_host,
+                    ) from exc
                 redirect_count += 1
                 current_params = None
                 if response.status_code == 303:
@@ -233,6 +278,8 @@ def _safe_redirect_url(
         raise HttpRequestError(
             ErrorCode.NETWORK_PERMANENT,
             "Unsafe HTTP redirect was rejected.",
+            failure_kind=HttpRequestFailureKind.REDIRECT_REJECTED,
+            allowed_host=False,
         )
     target = urljoin(current_url, location)
     current = urlparse(current_url)
@@ -241,11 +288,15 @@ def _safe_redirect_url(
         raise HttpRequestError(
             ErrorCode.NETWORK_PERMANENT,
             "Unsafe HTTP redirect was rejected.",
+            failure_kind=HttpRequestFailureKind.REDIRECT_REJECTED,
+            allowed_host=False,
         )
     if parsed.username is not None or parsed.password is not None:
         raise HttpRequestError(
             ErrorCode.NETWORK_PERMANENT,
             "Unsafe HTTP redirect was rejected.",
+            failure_kind=HttpRequestFailureKind.REDIRECT_REJECTED,
+            allowed_host=False,
         )
     if parsed.hostname != current.hostname and not _host_is_allowed(
         parsed.hostname,
@@ -254,12 +305,16 @@ def _safe_redirect_url(
         raise HttpRequestError(
             ErrorCode.NETWORK_PERMANENT,
             "Unsafe HTTP redirect was rejected.",
+            failure_kind=HttpRequestFailureKind.REDIRECT_REJECTED,
+            allowed_host=False,
         )
     query_keys = {key.strip().lower() for key, _value in parse_qsl(parsed.query, keep_blank_values=True)}
     if not allow_sensitive_query and query_keys & _SENSITIVE_REDIRECT_QUERY_KEYS:
         raise HttpRequestError(
             ErrorCode.NETWORK_PERMANENT,
             "Unsafe HTTP redirect was rejected.",
+            failure_kind=HttpRequestFailureKind.REDIRECT_REJECTED,
+            allowed_host=True,
         )
     return target
 
@@ -269,7 +324,11 @@ def _host_is_allowed(hostname: str | None, allowed_hosts: tuple[str, ...]) -> bo
         return False
     normalized = hostname.lower().rstrip(".")
     for allowed in allowed_hosts:
-        allowed_normalized = allowed.lower().lstrip(".").rstrip(".")
-        if normalized == allowed_normalized or normalized.endswith(f".{allowed_normalized}"):
+        allowed_value = allowed.lower().rstrip(".")
+        allow_subdomains = allowed_value.startswith(".")
+        allowed_normalized = allowed_value.lstrip(".")
+        if normalized == allowed_normalized or (
+            allow_subdomains and normalized.endswith(f".{allowed_normalized}")
+        ):
             return True
     return False

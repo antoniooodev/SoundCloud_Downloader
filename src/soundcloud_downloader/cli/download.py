@@ -160,6 +160,14 @@ def download_track(
         typer.echo(_GENERIC_FAILURE_MESSAGE, err=True)
         typer.echo(f"stage={exc.stage.value}", err=True)
         typer.echo(f"reason={exc.reason.value}", err=True)
+        if exc.failure_kind is not None:
+            typer.echo(f"failure_kind={exc.failure_kind.value}", err=True)
+        if exc.http_status is not None:
+            typer.echo(f"http_status={exc.http_status}", err=True)
+        if exc.redirect_count is not None:
+            typer.echo(f"redirect_count={exc.redirect_count}", err=True)
+        if exc.allowed_host is not None:
+            typer.echo(f"allowed_host={str(exc.allowed_host).lower()}", err=True)
         if exc.invalid_fields:
             typer.echo(f"invalid_fields={_format_invalid_fields(exc.invalid_fields)}", err=True)
         raise typer.Exit(code=1) from None

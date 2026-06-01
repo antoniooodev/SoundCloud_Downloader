@@ -23,6 +23,7 @@ from soundcloud_downloader.application.ports import (
 from soundcloud_downloader.application.resolved_stream_analysis_workflow import (
     HLSAnalysisError,
     HLSAnalysisFailureReason,
+    HLSManifestFetchFailureKind,
     ResolvedStreamAnalysisRequest,
     ResolvedStreamAnalysisWorkflow,
 )
@@ -118,10 +119,18 @@ class TrackDownloadWorkflowError(SoundcloudDownloaderError):
         *,
         stage: TrackDownloadFailureStage = TrackDownloadFailureStage.UNKNOWN,
         reason: TrackDownloadFailureReason = TrackDownloadFailureReason.UNKNOWN,
+        failure_kind: HLSManifestFetchFailureKind | None = None,
+        http_status: int | None = None,
+        redirect_count: int | None = None,
+        allowed_host: bool | None = None,
         invalid_fields: tuple[str, ...] = (),
     ) -> None:
         self.stage = stage
         self.reason = reason
+        self.failure_kind = failure_kind
+        self.http_status = http_status
+        self.redirect_count = redirect_count
+        self.allowed_host = allowed_host
         self.invalid_fields = invalid_fields
         super().__init__(code, message)
 
@@ -604,6 +613,10 @@ def _hls_workflow_error(exc: HLSAnalysisError) -> TrackDownloadWorkflowError:
         _WORKFLOW_ERROR_MESSAGE,
         stage=TrackDownloadFailureStage.STREAM_ANALYSIS,
         reason=_hls_failure_reason(exc.reason),
+        failure_kind=exc.manifest_fetch_failure_kind,
+        http_status=exc.manifest_request_status,
+        redirect_count=exc.redirect_count,
+        allowed_host=exc.allowed_host,
     )
 
 

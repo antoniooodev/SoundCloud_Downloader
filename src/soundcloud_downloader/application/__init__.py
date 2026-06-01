@@ -52,6 +52,7 @@ from soundcloud_downloader.application.reconstruction_planner import (
 from soundcloud_downloader.application.resolved_stream_analysis_workflow import (
     HLSAnalysisError,
     HLSAnalysisFailureReason,
+    HLSManifestFetchFailureKind,
     HLSManifestFetcherPort,
     ResolvedStreamAnalysisRequest,
     ResolvedStreamAnalysisResult,
@@ -90,6 +91,7 @@ __all__ = [
     "HLSManifestAnalyzer",
     "HLSAnalysisError",
     "HLSAnalysisFailureReason",
+    "HLSManifestFetchFailureKind",
     "HLSManifestFetcherPort",
     "HLSSegmentPlanner",
     "HLSSegmentPlanningError",

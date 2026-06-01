@@ -35,7 +35,7 @@ TRACK_URL = "https://soundcloud.com/artist/example-track"
 NORMALIZED_TRACK_URL = "https://soundcloud.com/artist/example-track"
 RESOLVE_HOST = "api.soundcloud.test"
 AUTH_HOST = "auth.soundcloud.test"
-MEDIA_HOST = "cdn.example.test"
+MEDIA_HOST = "cf-media.sndcdn.com"
 TRANSCODING_URL = f"https://{RESOLVE_HOST}/tracks/123/transcodings/hls"
 REAL_LIKE_TRANSCODING_URL = (
     f"https://{RESOLVE_HOST}/media/soundcloud:tracks:123/abc/stream/hls"
@@ -231,6 +231,7 @@ class E2EHttpTransport:
         self.transcoding_calls = 0
         self.streams_calls = 0
         self.manifest_calls = 0
+        self.manifest_accept_headers: list[str | None] = []
         self.segment_calls: list[str] = []
         self.refresh_calls = 0
         self.resolve_authorizations: list[str | None] = []
@@ -271,6 +272,7 @@ class E2EHttpTransport:
             return httpx.Response(200, json={"url": self.stream_url}, request=request)
         if full_url == self.stream_url:
             self.manifest_calls += 1
+            self.manifest_accept_headers.append(request.headers.get("accept"))
             if self.manifest_redirect_location is not None:
                 return httpx.Response(
                     302,
@@ -280,9 +282,11 @@ class E2EHttpTransport:
             return httpx.Response(self.manifest_status, text=self.manifest_body, request=request)
         if full_url == DIRECT_HLS_STREAM_URL:
             self.manifest_calls += 1
+            self.manifest_accept_headers.append(request.headers.get("accept"))
             return httpx.Response(200, text=self.manifest_body, request=request)
         if full_url in self.extra_manifests:
             self.manifest_calls += 1
+            self.manifest_accept_headers.append(request.headers.get("accept"))
             return httpx.Response(200, text=self.extra_manifests[full_url], request=request)
         if full_url in self.segments:
             self.segment_calls.append(full_url)
@@ -703,6 +707,8 @@ def test_hls_manifest_http_failure_reports_specific_safe_reason(
     assert exit_code != 0
     assert "stage=stream_analysis" in output
     assert "reason=hls_manifest_fetch_failed" in output
+    assert "failure_kind=http_status" in output
+    assert "http_status=403" in output
     assert STREAM_URL not in output
     assert "SHOULD_NOT_LEAK" not in output
 
@@ -720,7 +726,9 @@ def test_hls_manifest_unsafe_redirect_reports_specific_safe_reason(
 
     assert exit_code != 0
     assert "stage=stream_analysis" in output
-    assert "reason=hls_manifest_redirect_rejected" in output
+    assert "reason=hls_manifest_fetch_failed" in output
+    assert "failure_kind=redirect_rejected" in output
+    assert "allowed_host=false" in output
     assert redirect_url not in output
     assert "SHOULD_NOT_LEAK" not in output
 
@@ -742,6 +750,22 @@ def test_hls_manifest_safe_redirect_succeeds(
     assert transport.manifest_calls == 2
     assert REDIRECT_STREAM_URL not in output
     assert "SHOULD_NOT_LEAK" not in output
+
+
+def test_hls_manifest_request_sends_media_accept_header(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    env_file, _store, _key = prepared_env(tmp_path)
+    transport = E2EHttpTransport()
+    install_test_doubles(monkeypatch, transport)
+
+    exit_code, output = invoke(*_common_args(env_file))
+
+    assert exit_code == 0, output
+    assert transport.manifest_accept_headers == [
+        "application/vnd.apple.mpegurl, application/x-mpegURL, audio/mpegurl, */*"
+    ]
 
 
 def test_hls_malformed_manifest_reports_parse_failed(
